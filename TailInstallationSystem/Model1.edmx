@@ -1,0 +1,169 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="3.0" xmlns:edmx="http://schemas.microsoft.com/ado/2009/11/edmx">
+  <!-- EF Runtime content -->
+  <edmx:Runtime>
+    <!-- SSDL content -->
+    <edmx:StorageModels>
+      <Schema Namespace="NodeInstrumentMESModel.Store" Provider="System.Data.SqlClient" ProviderManifestToken="2012" Alias="Self" xmlns:store="http://schemas.microsoft.com/ado/2007/12/edm/EntityStoreSchemaGenerator" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm/ssdl">
+        <EntityType Name="ProductData">
+          <Key>
+            <PropertyRef Name="Id" />
+          </Key>
+          <Property Name="Id" Type="bigint" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="Barcode" Type="nvarchar" MaxLength="50" Nullable="false" />
+          <Property Name="Process1_Data" Type="nvarchar(max)" />
+          <Property Name="Process2_Data" Type="nvarchar(max)" />
+          <Property Name="Process3_Data" Type="nvarchar(max)" />
+          <Property Name="Process4_Data" Type="nvarchar(max)" />
+          <Property Name="CompleteData" Type="nvarchar(max)" />
+          <Property Name="IsCompleted" Type="bit" />
+          <Property Name="IsUploaded" Type="bit" />
+          <Property Name="CreatedTime" Type="datetime2" Precision="7" />
+          <Property Name="CompletedTime" Type="datetime2" Precision="7" />
+          <Property Name="UploadedTime" Type="datetime2" Precision="7" />
+        </EntityType>
+        <EntityType Name="UploadQueue">
+          <Key>
+            <PropertyRef Name="Id" />
+          </Key>
+          <Property Name="Id" Type="bigint" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="Barcode" Type="nvarchar" MaxLength="50" Nullable="false" />
+          <Property Name="JsonData" Type="nvarchar(max)" Nullable="false" />
+          <Property Name="RetryCount" Type="int" />
+          <Property Name="CreatedTime" Type="datetime2" Precision="7" />
+          <Property Name="LastRetryTime" Type="datetime2" Precision="7" />
+        </EntityType>
+        <EntityType Name="Users">
+          <Key>
+            <PropertyRef Name="Id" />
+          </Key>
+          <Property Name="Id" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="UserName" Type="nvarchar" MaxLength="50" Nullable="false" />
+          <Property Name="Password" Type="nvarchar" MaxLength="255" Nullable="false" />
+          <Property Name="CreatedTime" Type="datetime2" Precision="7" />
+        </EntityType>
+        <!--生成过程中发现错误:
+警告 6035: 关系“FK_UploadQueue_ProductData”在关系主端上有一些列不属于表的键的一部分。已排除了此关系。
+        <Association Name="FK_UploadQueue_ProductData" />-->
+        <EntityContainer Name="NodeInstrumentMESModelStoreContainer">
+          <EntitySet Name="ProductData" EntityType="Self.ProductData" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="UploadQueue" EntityType="Self.UploadQueue" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="Users" EntityType="Self.Users" Schema="dbo" store:Type="Tables" />
+        </EntityContainer>
+      </Schema>
+    </edmx:StorageModels>
+    <!-- CSDL content -->
+    <edmx:ConceptualModels>
+      <Schema Namespace="NodeInstrumentMESModel" Alias="Self" annotation:UseStrongSpatialTypes="false" xmlns:annotation="http://schemas.microsoft.com/ado/2009/02/edm/annotation" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm">
+        <EntityType Name="ProductData">
+          <Key>
+            <PropertyRef Name="Id" />
+          </Key>
+          <Property Name="Id" Type="Int64" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="Barcode" Type="String" MaxLength="50" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="Process1_Data" Type="String" MaxLength="Max" FixedLength="false" Unicode="true" />
+          <Property Name="Process2_Data" Type="String" MaxLength="Max" FixedLength="false" Unicode="true" />
+          <Property Name="Process3_Data" Type="String" MaxLength="Max" FixedLength="false" Unicode="true" />
+          <Property Name="Process4_Data" Type="String" MaxLength="Max" FixedLength="false" Unicode="true" />
+          <Property Name="CompleteData" Type="String" MaxLength="Max" FixedLength="false" Unicode="true" />
+          <Property Name="IsCompleted" Type="Boolean" />
+          <Property Name="IsUploaded" Type="Boolean" />
+          <Property Name="CreatedTime" Type="DateTime" Precision="7" />
+          <Property Name="CompletedTime" Type="DateTime" Precision="7" />
+          <Property Name="UploadedTime" Type="DateTime" Precision="7" />
+        </EntityType>
+        <EntityType Name="UploadQueue">
+          <Key>
+            <PropertyRef Name="Id" />
+          </Key>
+          <Property Name="Id" Type="Int64" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="Barcode" Type="String" MaxLength="50" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="JsonData" Type="String" MaxLength="Max" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="RetryCount" Type="Int32" />
+          <Property Name="CreatedTime" Type="DateTime" Precision="7" />
+          <Property Name="LastRetryTime" Type="DateTime" Precision="7" />
+        </EntityType>
+        <EntityType Name="Users">
+          <Key>
+            <PropertyRef Name="Id" />
+          </Key>
+          <Property Name="Id" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="UserName" Type="String" MaxLength="50" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="Password" Type="String" MaxLength="255" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="CreatedTime" Type="DateTime" Precision="7" />
+        </EntityType>
+        <EntityContainer Name="NodeInstrumentMESEntities" annotation:LazyLoadingEnabled="true">
+          <EntitySet Name="ProductData" EntityType="Self.ProductData" />
+          <EntitySet Name="UploadQueue" EntityType="Self.UploadQueue" />
+          <EntitySet Name="Users" EntityType="Self.Users" />
+        </EntityContainer>
+      </Schema>
+    </edmx:ConceptualModels>
+    <!-- C-S mapping content -->
+    <edmx:Mappings>
+      <Mapping Space="C-S" xmlns="http://schemas.microsoft.com/ado/2009/11/mapping/cs">
+        <EntityContainerMapping StorageEntityContainer="NodeInstrumentMESModelStoreContainer" CdmEntityContainer="NodeInstrumentMESEntities">
+          <EntitySetMapping Name="ProductData">
+            <EntityTypeMapping TypeName="NodeInstrumentMESModel.ProductData">
+              <MappingFragment StoreEntitySet="ProductData">
+                <ScalarProperty Name="Id" ColumnName="Id" />
+                <ScalarProperty Name="Barcode" ColumnName="Barcode" />
+                <ScalarProperty Name="Process1_Data" ColumnName="Process1_Data" />
+                <ScalarProperty Name="Process2_Data" ColumnName="Process2_Data" />
+                <ScalarProperty Name="Process3_Data" ColumnName="Process3_Data" />
+                <ScalarProperty Name="Process4_Data" ColumnName="Process4_Data" />
+                <ScalarProperty Name="CompleteData" ColumnName="CompleteData" />
+                <ScalarProperty Name="IsCompleted" ColumnName="IsCompleted" />
+                <ScalarProperty Name="IsUploaded" ColumnName="IsUploaded" />
+                <ScalarProperty Name="CreatedTime" ColumnName="CreatedTime" />
+                <ScalarProperty Name="CompletedTime" ColumnName="CompletedTime" />
+                <ScalarProperty Name="UploadedTime" ColumnName="UploadedTime" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="UploadQueue">
+            <EntityTypeMapping TypeName="NodeInstrumentMESModel.UploadQueue">
+              <MappingFragment StoreEntitySet="UploadQueue">
+                <ScalarProperty Name="Id" ColumnName="Id" />
+                <ScalarProperty Name="Barcode" ColumnName="Barcode" />
+                <ScalarProperty Name="JsonData" ColumnName="JsonData" />
+                <ScalarProperty Name="RetryCount" ColumnName="RetryCount" />
+                <ScalarProperty Name="CreatedTime" ColumnName="CreatedTime" />
+                <ScalarProperty Name="LastRetryTime" ColumnName="LastRetryTime" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Users">
+            <EntityTypeMapping TypeName="NodeInstrumentMESModel.Users">
+              <MappingFragment StoreEntitySet="Users">
+                <ScalarProperty Name="Id" ColumnName="Id" />
+                <ScalarProperty Name="UserName" ColumnName="UserName" />
+                <ScalarProperty Name="Password" ColumnName="Password" />
+                <ScalarProperty Name="CreatedTime" ColumnName="CreatedTime" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+        </EntityContainerMapping>
+      </Mapping>
+    </edmx:Mappings>
+  </edmx:Runtime>
+  <!-- EF Designer content (DO NOT EDIT MANUALLY BELOW HERE) -->
+  <Designer xmlns="http://schemas.microsoft.com/ado/2009/11/edmx">
+    <Connection>
+      <DesignerInfoPropertySet>
+        <DesignerProperty Name="MetadataArtifactProcessing" Value="EmbedInOutputAssembly" />
+      </DesignerInfoPropertySet>
+    </Connection>
+    <Options>
+      <DesignerInfoPropertySet>
+        <DesignerProperty Name="ValidateOnBuild" Value="true" />
+        <DesignerProperty Name="EnablePluralization" Value="false" />
+        <DesignerProperty Name="IncludeForeignKeysInModel" Value="true" />
+        <DesignerProperty Name="UseLegacyProvider" Value="false" />
+        <DesignerProperty Name="CodeGenerationStrategy" Value="无" />
+      </DesignerInfoPropertySet>
+    </Options>
+    <!-- Diagram content (shape and connector positions) -->
+    <Diagrams></Diagrams>
+  </Designer>
+</edmx:Edmx>
