@@ -32,8 +32,8 @@
             AntdUI.MenuItem menuItem2 = new AntdUI.MenuItem();
             this.label1 = new AntdUI.Label();
             this.panel1 = new AntdUI.Panel();
-            this.menu1 = new AntdUI.Menu();
             this.panelMain = new AntdUI.Panel();
+            this.menu1 = new AntdUI.Menu();
             this.panel1.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -44,7 +44,7 @@
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(1337, 51);
             this.label1.TabIndex = 0;
-            this.label1.Text = "安装尾插";
+            this.label1.Text = "安装尾椎";
             this.label1.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             // 
             // panel1
@@ -57,6 +57,15 @@
             this.panel1.Size = new System.Drawing.Size(1337, 625);
             this.panel1.TabIndex = 1;
             this.panel1.Text = "panel1";
+            // 
+            // panelMain
+            // 
+            this.panelMain.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panelMain.Location = new System.Drawing.Point(196, 0);
+            this.panelMain.Name = "panelMain";
+            this.panelMain.Size = new System.Drawing.Size(1141, 625);
+            this.panelMain.TabIndex = 3;
+            this.panelMain.Text = "panel2";
             // 
             // menu1
             // 
@@ -73,15 +82,6 @@
             this.menu1.Size = new System.Drawing.Size(196, 625);
             this.menu1.TabIndex = 2;
             this.menu1.Text = "menu1";
-            // 
-            // panelMain
-            // 
-            this.panelMain.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.panelMain.Location = new System.Drawing.Point(196, 0);
-            this.panelMain.Name = "panelMain";
-            this.panelMain.Size = new System.Drawing.Size(1141, 625);
-            this.panelMain.TabIndex = 3;
-            this.panelMain.Text = "panel2";
             // 
             // Form1
             // 

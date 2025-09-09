@@ -29,7 +29,7 @@ namespace TailInstallationSystem
                     LoadUserControl(new AddUser());
                     break;
                 case "DeleteUser":
-                     LoadUserControl(new DeleteUser());
+                    LoadUserControl(new DeleteUser());
                     break;
             }
         }

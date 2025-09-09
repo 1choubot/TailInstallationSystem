@@ -16,7 +16,14 @@ namespace TailInstallationSystem
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new LoginForm());
+
+            // 先显示登录窗体
+            var loginForm = new LoginForm();
+            if (loginForm.ShowDialog() == DialogResult.OK)
+            {
+                // 登录成功后显示主窗体
+                Application.Run(new MainWindow());
+            }
         }
     }
 }

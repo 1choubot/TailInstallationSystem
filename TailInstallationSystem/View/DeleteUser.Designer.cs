@@ -48,7 +48,7 @@
             this.panel1.Controls.Add(this.txtSearch);
             this.panel1.Controls.Add(this.label2);
             this.panel1.Controls.Add(this.label1);
-            this.panel1.Location = new System.Drawing.Point(192, 109);
+            this.panel1.Location = new System.Drawing.Point(50, 42);
             this.panel1.Name = "panel1";
             this.panel1.Size = new System.Drawing.Size(904, 595);
             this.panel1.TabIndex = 0;
@@ -130,7 +130,7 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.panel1);
             this.Name = "DeleteUser";
-            this.Size = new System.Drawing.Size(1290, 788);
+            this.Size = new System.Drawing.Size(1013, 680);
             this.panel1.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.dgvUsers)).EndInit();
             this.ResumeLayout(false);

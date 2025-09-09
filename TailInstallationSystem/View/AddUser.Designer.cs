@@ -50,7 +50,7 @@
             this.panel1.Controls.Add(this.label3);
             this.panel1.Controls.Add(this.label2);
             this.panel1.Controls.Add(this.label1);
-            this.panel1.Location = new System.Drawing.Point(135, 67);
+            this.panel1.Location = new System.Drawing.Point(44, 26);
             this.panel1.Name = "panel1";
             this.panel1.Size = new System.Drawing.Size(946, 561);
             this.panel1.TabIndex = 1;
@@ -130,7 +130,7 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.panel1);
             this.Name = "AddUser";
-            this.Size = new System.Drawing.Size(1207, 745);
+            this.Size = new System.Drawing.Size(1043, 619);
             this.panel1.ResumeLayout(false);
             this.ResumeLayout(false);
 
