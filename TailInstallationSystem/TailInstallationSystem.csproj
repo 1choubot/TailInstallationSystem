@@ -160,6 +160,12 @@
     <Compile Include="View\SystemLogControl.Designer.cs">
       <DependentUpon>SystemLogControl.cs</DependentUpon>
     </Compile>
+    <Compile Include="View\SystemMonitorControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="View\SystemMonitorControl.Designer.cs">
+      <DependentUpon>SystemMonitorControl.cs</DependentUpon>
+    </Compile>
     <Compile Include="View\UserAddDialog.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -201,6 +207,12 @@
     </EmbeddedResource>
     <EmbeddedResource Include="View\DeleteUser.resx">
       <DependentUpon>DeleteUser.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="View\SystemLogControl.resx">
+      <DependentUpon>SystemLogControl.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="View\SystemMonitorControl.resx">
+      <DependentUpon>SystemMonitorControl.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="View\UserAddDialog.resx">
       <DependentUpon>UserAddDialog.cs</DependentUpon>

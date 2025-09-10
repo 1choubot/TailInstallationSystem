@@ -47,11 +47,12 @@
             // 
             // titleLabel
             // 
+            this.titleLabel.Dock = System.Windows.Forms.DockStyle.Top;
             this.titleLabel.Font = new System.Drawing.Font("微软雅黑", 16F, System.Drawing.FontStyle.Bold);
             this.titleLabel.Location = new System.Drawing.Point(27, 25);
-            this.titleLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.titleLabel.Margin = new System.Windows.Forms.Padding(4);
             this.titleLabel.Name = "titleLabel";
-            this.titleLabel.Size = new System.Drawing.Size(267, 50);
+            this.titleLabel.Size = new System.Drawing.Size(1226, 50);
             this.titleLabel.TabIndex = 0;
             this.titleLabel.Text = "生产数据查看";
             // 
@@ -61,17 +62,18 @@
             this.toolbarPanel.Controls.Add(this.searchTextBox);
             this.toolbarPanel.Controls.Add(this.exportButton);
             this.toolbarPanel.Controls.Add(this.refreshButton);
-            this.toolbarPanel.Location = new System.Drawing.Point(27, 88);
-            this.toolbarPanel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.toolbarPanel.Dock = System.Windows.Forms.DockStyle.Top;
+            this.toolbarPanel.Location = new System.Drawing.Point(27, 75);
+            this.toolbarPanel.Margin = new System.Windows.Forms.Padding(4);
             this.toolbarPanel.Name = "toolbarPanel";
-            this.toolbarPanel.Size = new System.Drawing.Size(1227, 62);
+            this.toolbarPanel.Size = new System.Drawing.Size(1226, 62);
             this.toolbarPanel.TabIndex = 1;
             // 
             // searchTextBox
             // 
             this.searchTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.searchTextBox.Location = new System.Drawing.Point(933, 10);
-            this.searchTextBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.searchTextBox.Location = new System.Drawing.Point(635, 10);
+            this.searchTextBox.Margin = new System.Windows.Forms.Padding(4);
             this.searchTextBox.Name = "searchTextBox";
             this.searchTextBox.PlaceholderText = "搜索条码...";
             this.searchTextBox.Size = new System.Drawing.Size(267, 44);
@@ -81,17 +83,17 @@
             // exportButton
             // 
             this.exportButton.Location = new System.Drawing.Point(133, 10);
-            this.exportButton.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.exportButton.Margin = new System.Windows.Forms.Padding(4);
             this.exportButton.Name = "exportButton";
             this.exportButton.Size = new System.Drawing.Size(107, 44);
             this.exportButton.TabIndex = 1;
-            this.exportButton.Text = "📤 导出";
+            this.exportButton.Text = "导出";
             this.exportButton.Click += new System.EventHandler(this.exportButton_Click);
             // 
             // refreshButton
             // 
             this.refreshButton.Location = new System.Drawing.Point(13, 10);
-            this.refreshButton.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.refreshButton.Margin = new System.Windows.Forms.Padding(4);
             this.refreshButton.Name = "refreshButton";
             this.refreshButton.Size = new System.Drawing.Size(107, 44);
             this.refreshButton.TabIndex = 0;
@@ -113,14 +115,15 @@
             this.isUploadedColumn,
             this.uploadedTimeColumn,
             this.actionsColumn});
-            this.dataGridView.Location = new System.Drawing.Point(27, 162);
-            this.dataGridView.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.dataGridView.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.dataGridView.Location = new System.Drawing.Point(27, 137);
+            this.dataGridView.Margin = new System.Windows.Forms.Padding(4);
             this.dataGridView.Name = "dataGridView";
             this.dataGridView.ReadOnly = true;
             this.dataGridView.RowHeadersVisible = false;
             this.dataGridView.RowHeadersWidth = 51;
             this.dataGridView.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.dataGridView.Size = new System.Drawing.Size(1227, 625);
+            this.dataGridView.Size = new System.Drawing.Size(1226, 650);
             this.dataGridView.TabIndex = 2;
             this.dataGridView.CellClick += new System.Windows.Forms.DataGridViewCellEventHandler(this.dataGridView_CellClick);
             // 
@@ -167,6 +170,7 @@
             this.isUploadedColumn.MinimumWidth = 6;
             this.isUploadedColumn.Name = "isUploadedColumn";
             this.isUploadedColumn.ReadOnly = true;
+            this.isUploadedColumn.Width = 125;
             // 
             // uploadedTimeColumn
             // 
@@ -185,6 +189,7 @@
             this.actionsColumn.ReadOnly = true;
             this.actionsColumn.Text = "查看详情";
             this.actionsColumn.UseColumnTextForButtonValue = true;
+            this.actionsColumn.Width = 125;
             // 
             // DataViewControl
             // 
@@ -194,7 +199,7 @@
             this.Controls.Add(this.dataGridView);
             this.Controls.Add(this.toolbarPanel);
             this.Controls.Add(this.titleLabel);
-            this.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.Margin = new System.Windows.Forms.Padding(4);
             this.Name = "DataViewControl";
             this.Padding = new System.Windows.Forms.Padding(27, 25, 27, 25);
             this.Size = new System.Drawing.Size(1280, 812);

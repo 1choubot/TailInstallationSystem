@@ -1,5 +1,4 @@
-﻿// Models/CommunicationConfig.cs
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 
 namespace TailInstallationSystem.Models
 {
