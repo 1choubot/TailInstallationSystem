@@ -58,7 +58,7 @@ namespace TailInstallationSystem
 
                 LogManager.LogInfo("开始加载用户列表");
 
-                var users = GetAllUsers();
+                var users = userManager.GetAllUsers();
 
                 userListView.Items.Clear();
 
@@ -78,7 +78,7 @@ namespace TailInstallationSystem
                 }
 
                 LogManager.LogInfo($"加载了 {users.Count} 个用户");
-                ShowMessage($"加载了 {users.Count} 个用户", NotificationType.Info);
+                // ShowMessage($"加载了 {users.Count} 个用户", NotificationType.Info); // 删除或注释此行
             }
             catch (Exception ex)
             {
@@ -220,8 +220,29 @@ namespace TailInstallationSystem
         {
             try
             {
-                LogManager.LogInfo("显示添加用户对话框");
-                ShowMessage("添加用户功能需要实现 UserEditDialog", NotificationType.Info);
+                var dialog = new UserAddDialog();
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    var newUser = new User
+                    {
+                        Username = dialog.UserName,
+                        PasswordHash = dialog.Password,
+                        CreatedTime = DateTime.Now,
+                        Permission = UserPermission.Viewer, // 默认权限，可扩展
+                        IsActive = true
+                    };
+
+                    if (userManager.CreateUser(newUser))
+                    {
+                        LogManager.LogInfo($"添加用户成功: {newUser.Username}");
+                        ShowMessage("用户添加成功！", NotificationType.Success);
+                        RefreshUserList();
+                    }
+                    else
+                    {
+                        ShowMessage("用户添加失败！", NotificationType.Error);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -278,9 +299,16 @@ namespace TailInstallationSystem
                 if (result == DialogResult.Yes)
                 {
                     LogManager.LogInfo($"删除用户: {user.Username}");
-                    userListView.Items.Remove(userListView.SelectedItems[0]);
-                    ShowMessage("用户删除成功！", NotificationType.Success);
-                    LogManager.LogInfo($"用户 {user.Username} 已被删除");
+                    if (userManager.DeleteUser(user.Id))
+                    {
+                        ShowMessage("用户删除成功！", NotificationType.Success);
+                        LogManager.LogInfo($"用户 {user.Username} 已被删除");
+                        RefreshUserList();
+                    }
+                    else
+                    {
+                        ShowMessage("用户删除失败！", NotificationType.Error);
+                    }
                 }
             }
             catch (Exception ex)
@@ -370,39 +398,90 @@ namespace TailInstallationSystem
     {
         public List<User> GetAllUsers()
         {
-            // 这里需要实现实际的数据库查询逻辑
-            // 暂时返回空列表，避免异常
-            return new List<User>();
+            using (var db = new NodeInstrumentMESEntities())
+            {
+                // 查询数据库中的所有用户
+                return db.Users.Select(u => new User
+                {
+                    Id = u.Id,
+                    Username = u.UserName,
+                    PasswordHash = u.Password,
+                    CreatedTime = u.CreatedTime,
+                    
+                    Permission = UserPermission.Viewer 
+                }).ToList();
+            }
         }
 
         public User GetUserById(long id)
         {
-            // 实现根据ID获取用户
-            return null;
+            using (var db = new NodeInstrumentMESEntities())
+            {
+                var u = db.Users.FirstOrDefault(x => x.Id == id);
+                if (u == null) return null;
+                return new User
+                {
+                    Id = u.Id,
+                    Username = u.UserName,
+                    PasswordHash = u.Password,
+                    CreatedTime = u.CreatedTime,
+                    Permission = UserPermission.Viewer 
+                };
+            }
         }
 
         public bool CreateUser(User user)
         {
-            // 实现创建用户
-            return false;
+            using (var db = new NodeInstrumentMESEntities())
+            {
+                var entity = new Users
+                {
+                    UserName = user.Username,
+                    Password = user.PasswordHash,
+                    CreatedTime = user.CreatedTime ?? DateTime.Now
+                };
+                db.Users.Add(entity);
+                db.SaveChanges();
+                return true;
+            }
         }
 
         public bool UpdateUser(User user)
         {
-            // 实现更新用户
-            return false;
+            using (var db = new NodeInstrumentMESEntities())
+            {
+                var entity = db.Users.FirstOrDefault(x => x.Id == user.Id);
+                if (entity == null) return false;
+                entity.UserName = user.Username;
+                entity.Password = user.PasswordHash;
+                // 其它字段可补充
+                db.SaveChanges();
+                return true;
+            }
         }
 
         public bool DeleteUser(long id)
         {
-            // 实现删除用户
-            return false;
+            using (var db = new NodeInstrumentMESEntities())
+            {
+                var entity = db.Users.FirstOrDefault(x => x.Id == id);
+                if (entity == null) return false;
+                db.Users.Remove(entity);
+                db.SaveChanges();
+                return true;
+            }
         }
 
         public bool ResetPassword(long id)
         {
-            // 实现重置密码
-            return false;
+            using (var db = new NodeInstrumentMESEntities())
+            {
+                var entity = db.Users.FirstOrDefault(x => x.Id == id);
+                if (entity == null) return false;
+                entity.Password = "123456"; // 默认密码，可加密
+                db.SaveChanges();
+                return true;
+            }
         }
     }
 }

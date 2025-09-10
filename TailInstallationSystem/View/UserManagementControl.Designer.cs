@@ -29,8 +29,6 @@
         private void InitializeComponent()
         {
             this.components = new System.ComponentModel.Container();
-            this.titleLabel = new AntdUI.Label();
-            this.addUserButton = new AntdUI.Button();
             this.userListView = new System.Windows.Forms.ListView();
             this.usernameHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.permissionHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
@@ -42,29 +40,12 @@
             this.deleteUserMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             this.resetPasswordMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.topPanel = new System.Windows.Forms.Panel();
+            this.addUserButton = new AntdUI.Button();
+            this.titleLabel = new AntdUI.Label();
             this.contextMenuStrip.SuspendLayout();
+            this.topPanel.SuspendLayout();
             this.SuspendLayout();
-            // 
-            // titleLabel
-            // 
-            this.titleLabel.Font = new System.Drawing.Font("Microsoft YaHei", 16F, System.Drawing.FontStyle.Bold);
-            this.titleLabel.Location = new System.Drawing.Point(20, 20);
-            this.titleLabel.Name = "titleLabel";
-            this.titleLabel.Size = new System.Drawing.Size(200, 40);
-            this.titleLabel.TabIndex = 0;
-            this.titleLabel.Text = "用户管理";
-            this.titleLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            // 
-            // addUserButton
-            // 
-            this.addUserButton.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
-            this.addUserButton.Location = new System.Drawing.Point(800, 20);
-            this.addUserButton.Name = "addUserButton";
-            this.addUserButton.Size = new System.Drawing.Size(120, 40);
-            this.addUserButton.TabIndex = 1;
-            this.addUserButton.Text = "➕ 添加用户";
-            this.addUserButton.Type = AntdUI.TTypeMini.Primary;
-            this.addUserButton.Click += new System.EventHandler(this.addUserButton_Click);
             // 
             // userListView
             // 
@@ -76,17 +57,18 @@
             this.lastLoginHeader,
             this.statusHeader});
             this.userListView.ContextMenuStrip = this.contextMenuStrip;
-            this.userListView.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
+            this.userListView.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.userListView.Font = new System.Drawing.Font("微软雅黑", 9F);
             this.userListView.FullRowSelect = true;
             this.userListView.GridLines = true;
             this.userListView.HideSelection = false;
-            this.userListView.Location = new System.Drawing.Point(20, 80);
+            this.userListView.Location = new System.Drawing.Point(27, 106);
+            this.userListView.Margin = new System.Windows.Forms.Padding(4);
             this.userListView.MultiSelect = false;
             this.userListView.Name = "userListView";
-            this.userListView.Size = new System.Drawing.Size(920, 500);
+            this.userListView.Size = new System.Drawing.Size(1226, 619);
             this.userListView.TabIndex = 2;
             this.userListView.UseCompatibleStateImageBehavior = false;
-            // 修复：确保使用正确的命名空间
             this.userListView.View = System.Windows.Forms.View.Details;
             this.userListView.DoubleClick += new System.EventHandler(this.userListView_DoubleClick);
             // 
@@ -117,59 +99,93 @@
             // 
             // contextMenuStrip
             // 
+            this.contextMenuStrip.ImageScalingSize = new System.Drawing.Size(20, 20);
             this.contextMenuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.editUserMenuItem,
             this.deleteUserMenuItem,
             this.toolStripSeparator1,
             this.resetPasswordMenuItem});
             this.contextMenuStrip.Name = "contextMenuStrip";
-            this.contextMenuStrip.Size = new System.Drawing.Size(125, 76);
+            this.contextMenuStrip.Size = new System.Drawing.Size(139, 82);
             // 
             // editUserMenuItem
             // 
             this.editUserMenuItem.Name = "editUserMenuItem";
-            this.editUserMenuItem.Size = new System.Drawing.Size(124, 22);
+            this.editUserMenuItem.Size = new System.Drawing.Size(138, 24);
             this.editUserMenuItem.Text = "编辑用户";
             this.editUserMenuItem.Click += new System.EventHandler(this.editUserMenuItem_Click);
             // 
             // deleteUserMenuItem
             // 
             this.deleteUserMenuItem.Name = "deleteUserMenuItem";
-            this.deleteUserMenuItem.Size = new System.Drawing.Size(124, 22);
+            this.deleteUserMenuItem.Size = new System.Drawing.Size(138, 24);
             this.deleteUserMenuItem.Text = "删除用户";
             this.deleteUserMenuItem.Click += new System.EventHandler(this.deleteUserMenuItem_Click);
             // 
             // toolStripSeparator1
             // 
             this.toolStripSeparator1.Name = "toolStripSeparator1";
-            this.toolStripSeparator1.Size = new System.Drawing.Size(121, 6);
+            this.toolStripSeparator1.Size = new System.Drawing.Size(135, 6);
             // 
             // resetPasswordMenuItem
             // 
             this.resetPasswordMenuItem.Name = "resetPasswordMenuItem";
-            this.resetPasswordMenuItem.Size = new System.Drawing.Size(124, 22);
+            this.resetPasswordMenuItem.Size = new System.Drawing.Size(138, 24);
             this.resetPasswordMenuItem.Text = "重置密码";
             this.resetPasswordMenuItem.Click += new System.EventHandler(this.resetPasswordMenuItem_Click);
             // 
+            // topPanel
+            // 
+            this.topPanel.Controls.Add(this.addUserButton);
+            this.topPanel.Controls.Add(this.titleLabel);
+            this.topPanel.Dock = System.Windows.Forms.DockStyle.Top;
+            this.topPanel.Location = new System.Drawing.Point(27, 25);
+            this.topPanel.Margin = new System.Windows.Forms.Padding(4);
+            this.topPanel.Name = "topPanel";
+            this.topPanel.Size = new System.Drawing.Size(1226, 81);
+            this.topPanel.TabIndex = 3;
+            // 
+            // addUserButton
+            // 
+            this.addUserButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.addUserButton.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.addUserButton.Location = new System.Drawing.Point(999, 15);
+            this.addUserButton.Margin = new System.Windows.Forms.Padding(4);
+            this.addUserButton.Name = "addUserButton";
+            this.addUserButton.Size = new System.Drawing.Size(160, 50);
+            this.addUserButton.TabIndex = 3;
+            this.addUserButton.Text = "➕ 添加用户";
+            this.addUserButton.Type = AntdUI.TTypeMini.Primary;
+            this.addUserButton.Click += new System.EventHandler(this.addUserButton_Click);
+            // 
+            // titleLabel
+            // 
+            this.titleLabel.Font = new System.Drawing.Font("微软雅黑", 16F, System.Drawing.FontStyle.Bold);
+            this.titleLabel.Location = new System.Drawing.Point(13, 15);
+            this.titleLabel.Margin = new System.Windows.Forms.Padding(4);
+            this.titleLabel.Name = "titleLabel";
+            this.titleLabel.Size = new System.Drawing.Size(267, 50);
+            this.titleLabel.TabIndex = 2;
+            this.titleLabel.Text = "用户管理";
+            // 
             // UserManagementControl
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.White;
             this.Controls.Add(this.userListView);
-            this.Controls.Add(this.addUserButton);
-            this.Controls.Add(this.titleLabel);
+            this.Controls.Add(this.topPanel);
+            this.Margin = new System.Windows.Forms.Padding(4);
             this.Name = "UserManagementControl";
-            this.Padding = new System.Windows.Forms.Padding(20);
-            this.Size = new System.Drawing.Size(960, 600);
+            this.Padding = new System.Windows.Forms.Padding(27, 25, 27, 25);
+            this.Size = new System.Drawing.Size(1280, 750);
             this.contextMenuStrip.ResumeLayout(false);
+            this.topPanel.ResumeLayout(false);
             this.ResumeLayout(false);
+
         }
 
         #endregion
-
-        private AntdUI.Label titleLabel;
-        private AntdUI.Button addUserButton;
         private System.Windows.Forms.ListView userListView;
         private System.Windows.Forms.ColumnHeader usernameHeader;
         private System.Windows.Forms.ColumnHeader permissionHeader;
@@ -181,5 +197,8 @@
         private System.Windows.Forms.ToolStripMenuItem deleteUserMenuItem;
         private System.Windows.Forms.ToolStripSeparator toolStripSeparator1;
         private System.Windows.Forms.ToolStripMenuItem resetPasswordMenuItem;
+        private System.Windows.Forms.Panel topPanel;
+        private AntdUI.Button addUserButton;
+        private AntdUI.Label titleLabel;
     }
 }

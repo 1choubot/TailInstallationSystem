@@ -9,12 +9,11 @@ namespace TailInstallationSystem
         public LoginForm()
         {
             InitializeComponent();
-            txtPassword.UseSystemPasswordChar = true; // 设置为密码模式
+            txtPassword.UseSystemPasswordChar = true;
             btnLogin.Click += BtnLogin_Click;
             this.Load += LoginForm_Load;
         }
 
-        // 启动时自动填充
         private void LoginForm_Load(object sender, EventArgs e)
         {
             txtUserName.Text = Properties.Settings.Default.UserName;
@@ -42,10 +41,9 @@ namespace TailInstallationSystem
                     Properties.Settings.Default.Password = password;
                     Properties.Settings.Default.Save();
 
-                    MessageBox.Show("登录成功！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    Form1 mainForm = new Form1();
-                    mainForm.Show();
-                    this.Hide();
+                    // 设置DialogResult来通知Program.cs登录成功
+                    this.DialogResult = DialogResult.OK;
+                    this.Close(); // 关闭登录窗体
                 }
                 else
                 {

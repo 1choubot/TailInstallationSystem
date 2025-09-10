@@ -148,18 +148,13 @@ namespace TailInstallationSystem
 
         private void SwitchUserControl(UserControl newControl)
         {
-            // 移除当前控件
-            if (currentUserControl != null)
-            {
-                contentPanel.Controls.Remove(currentUserControl);
-                currentUserControl.Dispose();
-            }
+            // 清空 contentPanel 所有控件
+            contentPanel.Controls.Clear();
 
-            // 添加新控件
+            // 添加新控件并填充
             currentUserControl = newControl;
             newControl.Dock = DockStyle.Fill;
             contentPanel.Controls.Add(newControl);
-            contentPanel.Controls.SetChildIndex(newControl, 0);
         }
 
         // 控制按钮事件处理

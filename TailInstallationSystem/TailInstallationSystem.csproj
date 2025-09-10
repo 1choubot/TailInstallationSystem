@@ -158,6 +158,9 @@
     <Compile Include="View\SystemLogControl.Designer.cs">
       <DependentUpon>SystemLogControl.cs</DependentUpon>
     </Compile>
+    <Compile Include="View\UserAddDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="View\UserManagementControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
@@ -193,6 +196,12 @@
     </EmbeddedResource>
     <EmbeddedResource Include="View\DeleteUser.resx">
       <DependentUpon>DeleteUser.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="View\UserAddDialog.resx">
+      <DependentUpon>UserAddDialog.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="View\UserManagementControl.resx">
+      <DependentUpon>UserManagementControl.cs</DependentUpon>
     </EmbeddedResource>
     <EntityDeploy Include="Model1.edmx">
       <Generator>EntityModelCodeGenerator</Generator>
