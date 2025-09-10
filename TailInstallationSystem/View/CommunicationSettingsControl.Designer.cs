@@ -45,10 +45,8 @@
             this.scannerIpLabel = new AntdUI.Label();
             this.screwGroupBox = new System.Windows.Forms.GroupBox();
             this.screwTestButton = new AntdUI.Button();
-            this.screwBaudComboBox = new AntdUI.Select();
-            this.screwBaudLabel = new AntdUI.Label();
-            this.screwComComboBox = new AntdUI.Select();
-            this.screwComLabel = new AntdUI.Label();
+            this.screwPortLabel = new AntdUI.Label();
+            this.screwIpLabel = new AntdUI.Label();
             this.pcGroupBox = new System.Windows.Forms.GroupBox();
             this.pcTestButton = new AntdUI.Button();
             this.pcPortTextBox = new AntdUI.Input();
@@ -56,6 +54,8 @@
             this.pcIpTextBox = new AntdUI.Input();
             this.pcIpLabel = new AntdUI.Label();
             this.saveButton = new AntdUI.Button();
+            this.screwIpTextBox = new AntdUI.Input();
+            this.screwPortTextBox = new AntdUI.Input();
             this.plcGroupBox.SuspendLayout();
             this.scannerGroupBox.SuspendLayout();
             this.screwGroupBox.SuspendLayout();
@@ -64,13 +64,13 @@
             // 
             // titleLabel
             // 
-            this.titleLabel.Font = new System.Drawing.Font("Microsoft YaHei", 16F, System.Drawing.FontStyle.Bold);
-            this.titleLabel.Location = new System.Drawing.Point(20, 20);
+            this.titleLabel.Font = new System.Drawing.Font("微软雅黑", 14F, System.Drawing.FontStyle.Bold);
+            this.titleLabel.Location = new System.Drawing.Point(27, 12);
+            this.titleLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.titleLabel.Name = "titleLabel";
-            this.titleLabel.Size = new System.Drawing.Size(200, 40);
+            this.titleLabel.Size = new System.Drawing.Size(267, 38);
             this.titleLabel.TabIndex = 0;
             this.titleLabel.Text = "通讯设置";
-            this.titleLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // plcGroupBox
             // 
@@ -81,20 +81,22 @@
             this.plcGroupBox.Controls.Add(this.plcPortLabel);
             this.plcGroupBox.Controls.Add(this.plcIpTextBox);
             this.plcGroupBox.Controls.Add(this.plcIpLabel);
-            this.plcGroupBox.Font = new System.Drawing.Font("Microsoft YaHei", 12F, System.Drawing.FontStyle.Bold);
-            this.plcGroupBox.Location = new System.Drawing.Point(20, 80);
+            this.plcGroupBox.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.plcGroupBox.Location = new System.Drawing.Point(27, 62);
+            this.plcGroupBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.plcGroupBox.Name = "plcGroupBox";
-            this.plcGroupBox.Size = new System.Drawing.Size(450, 150);
+            this.plcGroupBox.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.plcGroupBox.Size = new System.Drawing.Size(600, 162);
             this.plcGroupBox.TabIndex = 1;
             this.plcGroupBox.TabStop = false;
             this.plcGroupBox.Text = "PLC连接设置";
             // 
             // plcTestButton
             // 
-            this.plcTestButton.Location = new System.Drawing.Point(330, 100);
+            this.plcTestButton.Location = new System.Drawing.Point(440, 106);
+            this.plcTestButton.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.plcTestButton.Name = "plcTestButton";
-            this.plcTestButton.Radius = 6;
-            this.plcTestButton.Size = new System.Drawing.Size(100, 35);
+            this.plcTestButton.Size = new System.Drawing.Size(133, 38);
             this.plcTestButton.TabIndex = 6;
             this.plcTestButton.Text = "测试连接";
             this.plcTestButton.Type = AntdUI.TTypeMini.Primary;
@@ -102,60 +104,63 @@
             // 
             // plcStationTextBox
             // 
-            this.plcStationTextBox.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.plcStationTextBox.Location = new System.Drawing.Point(110, 68);
+            this.plcStationTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.plcStationTextBox.Location = new System.Drawing.Point(147, 75);
+            this.plcStationTextBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.plcStationTextBox.Name = "plcStationTextBox";
-            this.plcStationTextBox.Size = new System.Drawing.Size(100, 30);
+            this.plcStationTextBox.Size = new System.Drawing.Size(133, 35);
             this.plcStationTextBox.TabIndex = 5;
             this.plcStationTextBox.Text = "1";
             // 
             // plcStationLabel
             // 
-            this.plcStationLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.plcStationLabel.Location = new System.Drawing.Point(20, 70);
+            this.plcStationLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.plcStationLabel.Location = new System.Drawing.Point(27, 78);
+            this.plcStationLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.plcStationLabel.Name = "plcStationLabel";
-            this.plcStationLabel.Size = new System.Drawing.Size(80, 25);
+            this.plcStationLabel.Size = new System.Drawing.Size(107, 29);
             this.plcStationLabel.TabIndex = 4;
             this.plcStationLabel.Text = "站号:";
-            this.plcStationLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // plcPortTextBox
             // 
-            this.plcPortTextBox.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.plcPortTextBox.Location = new System.Drawing.Point(350, 28);
+            this.plcPortTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.plcPortTextBox.Location = new System.Drawing.Point(467, 31);
+            this.plcPortTextBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.plcPortTextBox.Name = "plcPortTextBox";
-            this.plcPortTextBox.Size = new System.Drawing.Size(80, 30);
+            this.plcPortTextBox.Size = new System.Drawing.Size(107, 35);
             this.plcPortTextBox.TabIndex = 3;
             this.plcPortTextBox.Text = "502";
             // 
             // plcPortLabel
             // 
-            this.plcPortLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.plcPortLabel.Location = new System.Drawing.Point(280, 30);
+            this.plcPortLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.plcPortLabel.Location = new System.Drawing.Point(373, 34);
+            this.plcPortLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.plcPortLabel.Name = "plcPortLabel";
-            this.plcPortLabel.Size = new System.Drawing.Size(60, 25);
+            this.plcPortLabel.Size = new System.Drawing.Size(80, 29);
             this.plcPortLabel.TabIndex = 2;
             this.plcPortLabel.Text = "端口:";
-            this.plcPortLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // plcIpTextBox
             // 
-            this.plcIpTextBox.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.plcIpTextBox.Location = new System.Drawing.Point(110, 28);
+            this.plcIpTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.plcIpTextBox.Location = new System.Drawing.Point(147, 31);
+            this.plcIpTextBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.plcIpTextBox.Name = "plcIpTextBox";
-            this.plcIpTextBox.Size = new System.Drawing.Size(150, 30);
+            this.plcIpTextBox.Size = new System.Drawing.Size(200, 35);
             this.plcIpTextBox.TabIndex = 1;
             this.plcIpTextBox.Text = "192.168.1.88";
             // 
             // plcIpLabel
             // 
-            this.plcIpLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.plcIpLabel.Location = new System.Drawing.Point(20, 30);
+            this.plcIpLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.plcIpLabel.Location = new System.Drawing.Point(27, 34);
+            this.plcIpLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.plcIpLabel.Name = "plcIpLabel";
-            this.plcIpLabel.Size = new System.Drawing.Size(80, 25);
+            this.plcIpLabel.Size = new System.Drawing.Size(107, 29);
             this.plcIpLabel.TabIndex = 0;
             this.plcIpLabel.Text = "IP地址:";
-            this.plcIpLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // scannerGroupBox
             // 
@@ -164,20 +169,22 @@
             this.scannerGroupBox.Controls.Add(this.scannerPortLabel);
             this.scannerGroupBox.Controls.Add(this.scannerIpTextBox);
             this.scannerGroupBox.Controls.Add(this.scannerIpLabel);
-            this.scannerGroupBox.Font = new System.Drawing.Font("Microsoft YaHei", 12F, System.Drawing.FontStyle.Bold);
-            this.scannerGroupBox.Location = new System.Drawing.Point(490, 80);
+            this.scannerGroupBox.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.scannerGroupBox.Location = new System.Drawing.Point(653, 62);
+            this.scannerGroupBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.scannerGroupBox.Name = "scannerGroupBox";
-            this.scannerGroupBox.Size = new System.Drawing.Size(450, 150);
+            this.scannerGroupBox.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.scannerGroupBox.Size = new System.Drawing.Size(600, 162);
             this.scannerGroupBox.TabIndex = 2;
             this.scannerGroupBox.TabStop = false;
             this.scannerGroupBox.Text = "扫码枪连接设置";
             // 
             // scannerTestButton
             // 
-            this.scannerTestButton.Location = new System.Drawing.Point(330, 100);
+            this.scannerTestButton.Location = new System.Drawing.Point(440, 106);
+            this.scannerTestButton.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.scannerTestButton.Name = "scannerTestButton";
-            this.scannerTestButton.Radius = 6;
-            this.scannerTestButton.Size = new System.Drawing.Size(100, 35);
+            this.scannerTestButton.Size = new System.Drawing.Size(133, 38);
             this.scannerTestButton.TabIndex = 4;
             this.scannerTestButton.Text = "测试连接";
             this.scannerTestButton.Type = AntdUI.TTypeMini.Primary;
@@ -185,105 +192,93 @@
             // 
             // scannerPortTextBox
             // 
-            this.scannerPortTextBox.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.scannerPortTextBox.Location = new System.Drawing.Point(350, 28);
+            this.scannerPortTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.scannerPortTextBox.Location = new System.Drawing.Point(467, 31);
+            this.scannerPortTextBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.scannerPortTextBox.Name = "scannerPortTextBox";
-            this.scannerPortTextBox.Size = new System.Drawing.Size(80, 30);
+            this.scannerPortTextBox.Size = new System.Drawing.Size(107, 35);
             this.scannerPortTextBox.TabIndex = 3;
             this.scannerPortTextBox.Text = "6666";
             // 
             // scannerPortLabel
             // 
-            this.scannerPortLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.scannerPortLabel.Location = new System.Drawing.Point(280, 30);
+            this.scannerPortLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.scannerPortLabel.Location = new System.Drawing.Point(373, 34);
+            this.scannerPortLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.scannerPortLabel.Name = "scannerPortLabel";
-            this.scannerPortLabel.Size = new System.Drawing.Size(60, 25);
+            this.scannerPortLabel.Size = new System.Drawing.Size(80, 29);
             this.scannerPortLabel.TabIndex = 2;
             this.scannerPortLabel.Text = "端口:";
-            this.scannerPortLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // scannerIpTextBox
             // 
-            this.scannerIpTextBox.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.scannerIpTextBox.Location = new System.Drawing.Point(110, 28);
+            this.scannerIpTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.scannerIpTextBox.Location = new System.Drawing.Point(147, 31);
+            this.scannerIpTextBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.scannerIpTextBox.Name = "scannerIpTextBox";
-            this.scannerIpTextBox.Size = new System.Drawing.Size(150, 30);
+            this.scannerIpTextBox.Size = new System.Drawing.Size(200, 35);
             this.scannerIpTextBox.TabIndex = 1;
             this.scannerIpTextBox.Text = "192.168.1.129";
             // 
             // scannerIpLabel
             // 
-            this.scannerIpLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.scannerIpLabel.Location = new System.Drawing.Point(20, 30);
+            this.scannerIpLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.scannerIpLabel.Location = new System.Drawing.Point(27, 34);
+            this.scannerIpLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.scannerIpLabel.Name = "scannerIpLabel";
-            this.scannerIpLabel.Size = new System.Drawing.Size(80, 25);
+            this.scannerIpLabel.Size = new System.Drawing.Size(107, 29);
             this.scannerIpLabel.TabIndex = 0;
             this.scannerIpLabel.Text = "IP地址:";
-            this.scannerIpLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // screwGroupBox
             // 
             this.screwGroupBox.Controls.Add(this.screwTestButton);
-            this.screwGroupBox.Controls.Add(this.screwBaudComboBox);
-            this.screwGroupBox.Controls.Add(this.screwBaudLabel);
-            this.screwGroupBox.Controls.Add(this.screwComComboBox);
-            this.screwGroupBox.Controls.Add(this.screwComLabel);
-            this.screwGroupBox.Font = new System.Drawing.Font("Microsoft YaHei", 12F, System.Drawing.FontStyle.Bold);
-            this.screwGroupBox.Location = new System.Drawing.Point(20, 250);
+            this.screwGroupBox.Controls.Add(this.screwPortTextBox);
+            this.screwGroupBox.Controls.Add(this.screwPortLabel);
+            this.screwGroupBox.Controls.Add(this.screwIpLabel);
+            this.screwGroupBox.Controls.Add(this.screwIpTextBox);
+            this.screwGroupBox.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.screwGroupBox.Location = new System.Drawing.Point(27, 238);
+            this.screwGroupBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.screwGroupBox.Name = "screwGroupBox";
-            this.screwGroupBox.Size = new System.Drawing.Size(450, 150);
+            this.screwGroupBox.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.screwGroupBox.Size = new System.Drawing.Size(600, 162);
             this.screwGroupBox.TabIndex = 3;
             this.screwGroupBox.TabStop = false;
             this.screwGroupBox.Text = "螺丝机连接设置";
             // 
             // screwTestButton
             // 
-            this.screwTestButton.Location = new System.Drawing.Point(330, 100);
+            this.screwTestButton.Location = new System.Drawing.Point(440, 106);
+            this.screwTestButton.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.screwTestButton.Name = "screwTestButton";
-            this.screwTestButton.Radius = 6;
-            this.screwTestButton.Size = new System.Drawing.Size(100, 35);
+            this.screwTestButton.Size = new System.Drawing.Size(133, 38);
             this.screwTestButton.TabIndex = 4;
             this.screwTestButton.Text = "测试连接";
             this.screwTestButton.Type = AntdUI.TTypeMini.Primary;
             this.screwTestButton.Click += new System.EventHandler(this.screwTestButton_Click);
             // 
-            // screwBaudComboBox
+            // screwPortLabel
             // 
-            this.screwBaudComboBox.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.screwBaudComboBox.Location = new System.Drawing.Point(330, 28);
-            this.screwBaudComboBox.Name = "screwBaudComboBox";
-            this.screwBaudComboBox.Size = new System.Drawing.Size(100, 30);
-            this.screwBaudComboBox.TabIndex = 3;
-            this.screwBaudComboBox.Text = "9600";
+            this.screwPortLabel.AutoSizeMode = AntdUI.TAutoSize.Auto;
+            this.screwPortLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.screwPortLabel.Location = new System.Drawing.Point(373, 43);
+            this.screwPortLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.screwPortLabel.Name = "screwPortLabel";
+            this.screwPortLabel.Size = new System.Drawing.Size(45, 20);
+            this.screwPortLabel.TabIndex = 2;
+            this.screwPortLabel.Text = "端口：";
             // 
-            // screwBaudLabel
+            // screwIpLabel
             // 
-            this.screwBaudLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.screwBaudLabel.Location = new System.Drawing.Point(250, 30);
-            this.screwBaudLabel.Name = "screwBaudLabel";
-            this.screwBaudLabel.Size = new System.Drawing.Size(70, 25);
-            this.screwBaudLabel.TabIndex = 2;
-            this.screwBaudLabel.Text = "波特率:";
-            this.screwBaudLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            // 
-            // screwComComboBox
-            // 
-            this.screwComComboBox.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.screwComComboBox.Location = new System.Drawing.Point(110, 28);
-            this.screwComComboBox.Name = "screwComComboBox";
-            this.screwComComboBox.Size = new System.Drawing.Size(120, 30);
-            this.screwComComboBox.TabIndex = 1;
-            this.screwComComboBox.Text = "COM1";
-            // 
-            // screwComLabel
-            // 
-            this.screwComLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.screwComLabel.Location = new System.Drawing.Point(20, 30);
-            this.screwComLabel.Name = "screwComLabel";
-            this.screwComLabel.Size = new System.Drawing.Size(80, 25);
-            this.screwComLabel.TabIndex = 0;
-            this.screwComLabel.Text = "串口:";
-            this.screwComLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.screwIpLabel.AutoSizeMode = AntdUI.TAutoSize.Auto;
+            this.screwIpLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.screwIpLabel.Location = new System.Drawing.Point(27, 44);
+            this.screwIpLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.screwIpLabel.Name = "screwIpLabel";
+            this.screwIpLabel.Size = new System.Drawing.Size(59, 20);
+            this.screwIpLabel.TabIndex = 0;
+            this.screwIpLabel.Text = "IP地址：";
             // 
             // pcGroupBox
             // 
@@ -292,20 +287,22 @@
             this.pcGroupBox.Controls.Add(this.pcPortLabel);
             this.pcGroupBox.Controls.Add(this.pcIpTextBox);
             this.pcGroupBox.Controls.Add(this.pcIpLabel);
-            this.pcGroupBox.Font = new System.Drawing.Font("Microsoft YaHei", 12F, System.Drawing.FontStyle.Bold);
-            this.pcGroupBox.Location = new System.Drawing.Point(490, 250);
+            this.pcGroupBox.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.pcGroupBox.Location = new System.Drawing.Point(653, 238);
+            this.pcGroupBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.pcGroupBox.Name = "pcGroupBox";
-            this.pcGroupBox.Size = new System.Drawing.Size(450, 150);
+            this.pcGroupBox.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.pcGroupBox.Size = new System.Drawing.Size(600, 162);
             this.pcGroupBox.TabIndex = 4;
             this.pcGroupBox.TabStop = false;
             this.pcGroupBox.Text = "PC通讯设置";
             // 
             // pcTestButton
             // 
-            this.pcTestButton.Location = new System.Drawing.Point(330, 100);
+            this.pcTestButton.Location = new System.Drawing.Point(440, 106);
+            this.pcTestButton.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.pcTestButton.Name = "pcTestButton";
-            this.pcTestButton.Radius = 6;
-            this.pcTestButton.Size = new System.Drawing.Size(100, 35);
+            this.pcTestButton.Size = new System.Drawing.Size(133, 38);
             this.pcTestButton.TabIndex = 4;
             this.pcTestButton.Text = "测试连接";
             this.pcTestButton.Type = AntdUI.TTypeMini.Primary;
@@ -313,59 +310,81 @@
             // 
             // pcPortTextBox
             // 
-            this.pcPortTextBox.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.pcPortTextBox.Location = new System.Drawing.Point(350, 28);
+            this.pcPortTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.pcPortTextBox.Location = new System.Drawing.Point(467, 31);
+            this.pcPortTextBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.pcPortTextBox.Name = "pcPortTextBox";
-            this.pcPortTextBox.Size = new System.Drawing.Size(80, 30);
+            this.pcPortTextBox.Size = new System.Drawing.Size(107, 35);
             this.pcPortTextBox.TabIndex = 3;
             this.pcPortTextBox.Text = "8888";
             // 
             // pcPortLabel
             // 
-            this.pcPortLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.pcPortLabel.Location = new System.Drawing.Point(280, 30);
+            this.pcPortLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.pcPortLabel.Location = new System.Drawing.Point(373, 34);
+            this.pcPortLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.pcPortLabel.Name = "pcPortLabel";
-            this.pcPortLabel.Size = new System.Drawing.Size(60, 25);
+            this.pcPortLabel.Size = new System.Drawing.Size(80, 29);
             this.pcPortLabel.TabIndex = 2;
             this.pcPortLabel.Text = "端口:";
-            this.pcPortLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // pcIpTextBox
             // 
-            this.pcIpTextBox.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.pcIpTextBox.Location = new System.Drawing.Point(110, 28);
+            this.pcIpTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.pcIpTextBox.Location = new System.Drawing.Point(147, 31);
+            this.pcIpTextBox.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.pcIpTextBox.Name = "pcIpTextBox";
-            this.pcIpTextBox.Size = new System.Drawing.Size(150, 30);
+            this.pcIpTextBox.Size = new System.Drawing.Size(200, 35);
             this.pcIpTextBox.TabIndex = 1;
             this.pcIpTextBox.Text = "192.168.1.102";
             // 
             // pcIpLabel
             // 
-            this.pcIpLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
-            this.pcIpLabel.Location = new System.Drawing.Point(20, 30);
+            this.pcIpLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.pcIpLabel.Location = new System.Drawing.Point(27, 34);
+            this.pcIpLabel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.pcIpLabel.Name = "pcIpLabel";
-            this.pcIpLabel.Size = new System.Drawing.Size(80, 25);
+            this.pcIpLabel.Size = new System.Drawing.Size(107, 29);
             this.pcIpLabel.TabIndex = 0;
             this.pcIpLabel.Text = "IP地址:";
-            this.pcIpLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // saveButton
             // 
             this.saveButton.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
-            this.saveButton.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
+            this.saveButton.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
             this.saveButton.ForeColor = System.Drawing.Color.White;
-            this.saveButton.Location = new System.Drawing.Point(420, 430);
+            this.saveButton.Location = new System.Drawing.Point(560, 425);
+            this.saveButton.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.saveButton.Name = "saveButton";
-            this.saveButton.Radius = 6;
-            this.saveButton.Size = new System.Drawing.Size(120, 40);
+            this.saveButton.Size = new System.Drawing.Size(160, 44);
             this.saveButton.TabIndex = 5;
             this.saveButton.Text = "保存设置";
             this.saveButton.Type = AntdUI.TTypeMini.Success;
             this.saveButton.Click += new System.EventHandler(this.saveButton_Click);
             // 
+            // screwIpTextBox
+            // 
+            this.screwIpTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.screwIpTextBox.Location = new System.Drawing.Point(147, 34);
+            this.screwIpTextBox.Margin = new System.Windows.Forms.Padding(4);
+            this.screwIpTextBox.Name = "screwIpTextBox";
+            this.screwIpTextBox.Size = new System.Drawing.Size(200, 35);
+            this.screwIpTextBox.TabIndex = 1;
+            this.screwIpTextBox.Text = "192.168.1.102";
+            // 
+            // screwPortTextBox
+            // 
+            this.screwPortTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.screwPortTextBox.Location = new System.Drawing.Point(466, 34);
+            this.screwPortTextBox.Margin = new System.Windows.Forms.Padding(4);
+            this.screwPortTextBox.Name = "screwPortTextBox";
+            this.screwPortTextBox.Size = new System.Drawing.Size(107, 35);
+            this.screwPortTextBox.TabIndex = 3;
+            this.screwPortTextBox.Text = "8888";
+            // 
             // CommunicationSettingsControl
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.White;
             this.Controls.Add(this.saveButton);
@@ -374,12 +393,14 @@
             this.Controls.Add(this.scannerGroupBox);
             this.Controls.Add(this.plcGroupBox);
             this.Controls.Add(this.titleLabel);
+            this.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.Name = "CommunicationSettingsControl";
-            this.Padding = new System.Windows.Forms.Padding(20);
-            this.Size = new System.Drawing.Size(960, 500);
+            this.Padding = new System.Windows.Forms.Padding(13, 12, 13, 25);
+            this.Size = new System.Drawing.Size(1280, 488);
             this.plcGroupBox.ResumeLayout(false);
             this.scannerGroupBox.ResumeLayout(false);
             this.screwGroupBox.ResumeLayout(false);
+            this.screwGroupBox.PerformLayout();
             this.pcGroupBox.ResumeLayout(false);
             this.ResumeLayout(false);
 
@@ -404,10 +425,8 @@
         private AntdUI.Label scannerIpLabel;
         private System.Windows.Forms.GroupBox screwGroupBox;
         private AntdUI.Button screwTestButton;
-        private AntdUI.Select screwBaudComboBox;
-        private AntdUI.Label screwBaudLabel;
-        private AntdUI.Select screwComComboBox;
-        private AntdUI.Label screwComLabel;
+        private AntdUI.Label screwIpLabel;
+        private AntdUI.Label screwPortLabel;
         private System.Windows.Forms.GroupBox pcGroupBox;
         private AntdUI.Button pcTestButton;
         private AntdUI.Input pcPortTextBox;
@@ -415,5 +434,7 @@
         private AntdUI.Input pcIpTextBox;
         private AntdUI.Label pcIpLabel;
         private AntdUI.Button saveButton;
+        private AntdUI.Input screwPortTextBox;
+        private AntdUI.Input screwIpTextBox;
     }
 }

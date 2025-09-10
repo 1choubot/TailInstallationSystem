@@ -1,73 +1,36 @@
 ﻿using AntdUI;
 using System;
-using System.IO.Ports;
 using System.Windows.Forms;
 using System.Net;
 using System.Threading.Tasks;
+using System.Net.Sockets;
+using HslCommunication.ModBus;
+using TailInstallationSystem.Models;
+using TailInstallationSystem.Utils;
 
 namespace TailInstallationSystem
 {
     public partial class CommunicationSettingsControl : UserControl
     {
+        private CommunicationConfig _config;
+
         public CommunicationSettingsControl()
         {
             InitializeComponent();
-            InitializeControls();
+            this.AutoScroll = true;
             LoadSettings();
         }
 
-        // 获取父窗体的辅助方法
         private Form GetParentForm()
         {
             return this.FindForm() ?? this.ParentForm;
-        }
-
-        private void InitializeControls()
-        {
-            InitializeComboBoxes();
-        }
-
-        private void InitializeComboBoxes()
-        {
-            try
-            {
-                // 初始化串口选项
-                screwComComboBox.Items.Clear();
-                var portNames = SerialPort.GetPortNames();
-                foreach (var port in portNames)
-                {
-                    screwComComboBox.Items.Add(port);
-                }
-                if (screwComComboBox.Items.Count > 0)
-                {
-                    screwComComboBox.SelectedIndex = 0;
-                }
-                else
-                {
-                    screwComComboBox.Items.Add("COM1");
-                    screwComComboBox.SelectedIndex = 0;
-                }
-
-                // 初始化波特率选项
-                screwBaudComboBox.Items.Clear();
-                var baudRates = new string[] { "9600", "19200", "38400", "57600", "115200" };
-                foreach (var baud in baudRates)
-                {
-                    screwBaudComboBox.Items.Add(baud);
-                }
-                screwBaudComboBox.SelectedIndex = 0; // 默认9600
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"初始化控件失败: {ex.Message}");
-            }
         }
 
         private void LoadSettings()
         {
             try
             {
-                // 从配置文件加载设置
+                _config = ConfigManager.LoadConfig();
                 LoadPLCSettings();
                 LoadScannerSettings();
                 LoadScrewDriverSettings();
@@ -83,24 +46,30 @@ namespace TailInstallationSystem
 
         private void LoadPLCSettings()
         {
-            // 可以从配置文件或注册表读取
-            // 这里使用默认值
+            plcIpTextBox.Text = _config.PLC.IP;
+            plcPortTextBox.Text = _config.PLC.Port.ToString();
+            plcStationTextBox.Text = _config.PLC.Station.ToString();
         }
 
         private void LoadScannerSettings()
         {
-            // 加载扫码枪设置
+            scannerIpTextBox.Text = _config.Scanner.IP;
+            scannerPortTextBox.Text = _config.Scanner.Port.ToString();
         }
 
         private void LoadScrewDriverSettings()
         {
-            // 加载螺丝机设置
+            screwIpTextBox.Text = _config.ScrewDriver.IP;
+            screwPortTextBox.Text = _config.ScrewDriver.Port.ToString();
         }
 
         private void LoadPCSettings()
         {
-            // 加载PC通讯设置
+            pcIpTextBox.Text = _config.PC.IP;
+            pcPortTextBox.Text = _config.PC.Port.ToString();
         }
+
+        #region 连接测试实现
 
         private async void plcTestButton_Click(object sender, EventArgs e)
         {
@@ -118,10 +87,16 @@ namespace TailInstallationSystem
 
                 LogManager.LogInfo($"测试PLC连接: {ip}:{port}, 站号:{station}");
 
-                // 模拟异步测试
-                await Task.Delay(2000);
+                bool success = await TestPLCConnection(ip, port, station);
 
-                AntdUI.Message.success(GetParentForm(), "PLC连接测试成功！", autoClose: 3);
+                if (success)
+                {
+                    AntdUI.Message.success(GetParentForm(), "PLC连接测试成功！", autoClose: 3);
+                }
+                else
+                {
+                    AntdUI.Message.error(GetParentForm(), "PLC连接测试失败！", autoClose: 3);
+                }
             }
             catch (Exception ex)
             {
@@ -151,9 +126,16 @@ namespace TailInstallationSystem
 
                 LogManager.LogInfo($"测试扫码枪连接: {ip}:{port}");
 
-                await Task.Delay(1500);
+                bool success = await TestTcpConnection(ip, port, "扫码枪");
 
-                AntdUI.Message.success(GetParentForm(), "扫码枪连接测试成功！", autoClose: 3);
+                if (success)
+                {
+                    AntdUI.Message.success(GetParentForm(), "扫码枪连接测试成功！", autoClose: 3);
+                }
+                else
+                {
+                    AntdUI.Message.error(GetParentForm(), "扫码枪连接测试失败！", autoClose: 3);
+                }
             }
             catch (Exception ex)
             {
@@ -178,14 +160,21 @@ namespace TailInstallationSystem
                 screwTestButton.Text = "测试中...";
                 screwTestButton.Enabled = false;
 
-                var com = screwComComboBox.Text;
-                var baud = int.Parse(screwBaudComboBox.Text);
+                var ip = screwIpTextBox.Text.Trim();
+                var port = int.Parse(screwPortTextBox.Text.Trim());
 
-                LogManager.LogInfo($"测试螺丝机连接: {com}, 波特率:{baud}");
+                LogManager.LogInfo($"测试螺丝机连接: {ip}:{port}");
 
-                await Task.Delay(1000);
+                bool success = await TestTcpConnection(ip, port, "螺丝机");
 
-                AntdUI.Message.success(GetParentForm(), "螺丝机连接测试成功！", autoClose: 3);
+                if (success)
+                {
+                    AntdUI.Message.success(GetParentForm(), "螺丝机连接测试成功！", autoClose: 3);
+                }
+                else
+                {
+                    AntdUI.Message.error(GetParentForm(), "螺丝机连接测试失败！", autoClose: 3);
+                }
             }
             catch (Exception ex)
             {
@@ -215,9 +204,16 @@ namespace TailInstallationSystem
 
                 LogManager.LogInfo($"测试PC通讯连接: {ip}:{port}");
 
-                await Task.Delay(1200);
+                bool success = await TestTcpConnection(ip, port, "PC");
 
-                AntdUI.Message.success(GetParentForm(), "PC通讯连接测试成功！", autoClose: 3);
+                if (success)
+                {
+                    AntdUI.Message.success(GetParentForm(), "PC通讯连接测试成功！", autoClose: 3);
+                }
+                else
+                {
+                    AntdUI.Message.error(GetParentForm(), "PC通讯连接测试失败！", autoClose: 3);
+                }
             }
             catch (Exception ex)
             {
@@ -232,27 +228,67 @@ namespace TailInstallationSystem
             }
         }
 
-        private void saveButton_Click(object sender, EventArgs e)
-        {
-            if (!ValidateAllInputs()) return;
+        #endregion
 
+        #region 连接测试方法
+
+        private async Task<bool> TestPLCConnection(string ip, int port, byte station)
+        {
             try
             {
-                // 保存所有设置
-                SaveAllSettings();
+                var modbusTcpClient = new ModbusTcpNet(ip, port, station);
+                var connectResult = await Task.Run(() => modbusTcpClient.ConnectServer());
 
-                LogManager.LogInfo("保存通讯设置");
-                AntdUI.Message.success(GetParentForm(), "设置保存成功！", autoClose: 3);
-
-                // 触发设置变更事件
-                SettingsChanged?.Invoke(this, EventArgs.Empty);
+                if (connectResult.IsSuccess)
+                {
+                    // 尝试读取一个地址测试连接
+                    var readResult = await Task.Run(() => modbusTcpClient.ReadBool("M100"));
+                    modbusTcpClient.ConnectClose();
+                    return readResult.IsSuccess;
+                }
+                return false;
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"保存设置失败: {ex.Message}");
-                AntdUI.Message.error(GetParentForm(), $"保存设置失败: {ex.Message}", autoClose: 3);
+                LogManager.LogError($"PLC连接测试异常: {ex.Message}");
+                return false;
             }
         }
+
+        private async Task<bool> TestTcpConnection(string ip, int port, string deviceName)
+        {
+            try
+            {
+                using (var tcpClient = new TcpClient())
+                {
+                    // 设置连接超时
+                    tcpClient.ReceiveTimeout = 5000;
+                    tcpClient.SendTimeout = 5000;
+
+                    var connectTask = tcpClient.ConnectAsync(ip, port);
+                    var timeoutTask = Task.Delay(5000);
+                    var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+
+                    if (completedTask == connectTask && !connectTask.IsFaulted && tcpClient.Connected)
+                    {
+                        LogManager.LogInfo($"{deviceName}连接测试成功");
+                        return true;
+                    }
+                    else
+                    {
+                        LogManager.LogWarning($"{deviceName}连接测试超时或失败");
+                        return false;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"{deviceName}连接测试异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        #endregion
 
         #region 输入验证方法
 
@@ -317,17 +353,24 @@ namespace TailInstallationSystem
 
         private bool ValidateScrewDriverInput()
         {
-            if (string.IsNullOrWhiteSpace(screwComComboBox.Text))
+            if (string.IsNullOrWhiteSpace(screwIpTextBox.Text))
             {
-                AntdUI.Message.error(GetParentForm(), "请选择螺丝机串口", autoClose: 3);
-                screwComComboBox.Focus();
+                AntdUI.Message.error(GetParentForm(), "请输入螺丝机IP地址", autoClose: 3);
+                screwIpTextBox.Focus();
                 return false;
             }
 
-            if (!int.TryParse(screwBaudComboBox.Text, out int baud))
+            if (!IPAddress.TryParse(screwIpTextBox.Text.Trim(), out _))
             {
-                AntdUI.Message.error(GetParentForm(), "螺丝机波特率格式不正确", autoClose: 3);
-                screwBaudComboBox.Focus();
+                AntdUI.Message.error(GetParentForm(), "螺丝机IP地址格式不正确", autoClose: 3);
+                screwIpTextBox.Focus();
+                return false;
+            }
+
+            if (!int.TryParse(screwPortTextBox.Text.Trim(), out int port) || port < 1 || port > 65535)
+            {
+                AntdUI.Message.error(GetParentForm(), "螺丝机端口号必须在1-65535之间", autoClose: 3);
+                screwPortTextBox.Focus();
                 return false;
             }
 
@@ -370,14 +413,51 @@ namespace TailInstallationSystem
 
         #endregion
 
+        private void saveButton_Click(object sender, EventArgs e)
+        {
+            if (!ValidateAllInputs()) return;
+
+            try
+            {
+                SaveAllSettings();
+                LogManager.LogInfo("保存通讯设置");
+                AntdUI.Message.success(GetParentForm(), "设置保存成功！", autoClose: 3);
+                SettingsChanged?.Invoke(this, EventArgs.Empty);
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"保存设置失败: {ex.Message}");
+                AntdUI.Message.error(GetParentForm(), $"保存设置失败: {ex.Message}", autoClose: 3);
+            }
+        }
+
         private void SaveAllSettings()
         {
-            // 实现保存逻辑到配置文件或数据库
-            // 这里可以使用 ConfigurationManager 或其他配置方案
+            // 更新配置对象
+            _config.PLC.IP = plcIpTextBox.Text.Trim();
+            _config.PLC.Port = int.Parse(plcPortTextBox.Text.Trim());
+            _config.PLC.Station = byte.Parse(plcStationTextBox.Text.Trim());
+
+            _config.Scanner.IP = scannerIpTextBox.Text.Trim();
+            _config.Scanner.Port = int.Parse(scannerPortTextBox.Text.Trim());
+
+            _config.ScrewDriver.IP = screwIpTextBox.Text.Trim();
+            _config.ScrewDriver.Port = int.Parse(screwPortTextBox.Text.Trim());
+
+            _config.PC.IP = pcIpTextBox.Text.Trim();
+            _config.PC.Port = int.Parse(pcPortTextBox.Text.Trim());
+
+            // 保存到配置文件
+            ConfigManager.SaveConfig(_config);
         }
 
         // 设置变更事件
         public event EventHandler SettingsChanged;
+
+        // 公共方法供其他模块获取当前配置
+        public CommunicationConfig GetCurrentConfig()
+        {
+            return _config;
+        }
     }
 }
-
