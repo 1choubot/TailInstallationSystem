@@ -183,8 +183,7 @@ namespace TailInstallationSystem
             // 如果当前显示的是系统监控界面，更新设备状态显示
             if (currentUserControl is View.SystemMonitorControl monitorControl)
             {
-                // 这里可以调用监控界面的方法来更新设备状态显示
-                // monitorControl.UpdateDeviceStatus(deviceName, isConnected);
+                monitorControl.UpdateExternalDeviceStatus(deviceName, isConnected);
             }
         }
 
