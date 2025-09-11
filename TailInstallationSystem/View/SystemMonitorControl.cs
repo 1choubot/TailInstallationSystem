@@ -10,6 +10,16 @@ namespace TailInstallationSystem.View
     {
         private CommunicationManager commManager;
         private TailInstallationController controller;
+        private Timer statusCheckTimer;
+
+        // Device status tracking
+        private enum DeviceStatus
+        {
+            Connected,      // 已连接 - 绿色
+            Disconnected,   // 未连接 - 红色  
+            Waiting,        // 等待数据 - 橙色
+            Working         // 工作中 - 蓝色
+        }
 
         public SystemMonitorControl(TailInstallationController controller, CommunicationManager commManager)
         {
@@ -23,7 +33,44 @@ namespace TailInstallationSystem.View
             btnStop.Click += btnStop_Click;
             btnSettings.Click += btnSettings_Click;
             btnEmergencyStop.Click += btnEmergencyStop_Click;
-            btnClearLog.Click += btnClearLog_Click; 
+            btnClearLog.Click += btnClearLog_Click;
+
+            // Subscribe to communication events
+            if (commManager != null)
+            {
+                commManager.OnDeviceConnectionChanged += OnDeviceConnectionChanged;
+                commManager.OnDataReceived += OnDataReceived;
+                commManager.OnBarcodeScanned += OnBarcodeScanned;
+                commManager.OnScrewDataReceived += OnScrewDataReceived;
+            }
+
+            // Subscribe to controller business events
+            if (controller != null)
+            {
+                controller.OnProcessStatusChanged += OnProcessStatusChanged;
+                controller.OnCurrentProductChanged += OnCurrentProductChanged;
+            }
+
+            // Initialize status check timer
+            InitializeStatusTimer();
+
+            // Initialize all devices to disconnected state and set default messages
+            InitializeDefaultState();
+        }
+
+        /// <summary>
+        /// Initialize the default UI state
+        /// </summary>
+        private void InitializeDefaultState()
+        {
+            UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
+            UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
+            UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
+            UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
+
+            // Set default product information
+            currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
+            currentStatusLabel.Text = "状态: 系统未启动";
         }
 
         private void OnLogMessage(LogManager.LogLevel level, string timestamp, string message)
@@ -57,7 +104,13 @@ namespace TailInstallationSystem.View
                 btnStart.Enabled = false;
                 btnStop.Enabled = true;
                 UpdateProgress(100);
-                UpdateConnectionStatus();
+
+                // Start status monitoring
+                StartStatusMonitoring();
+
+                // Update system status
+                currentStatusLabel.Text = "状态: 系统运行中";
+
                 LogManager.LogInfo("系统启动成功");
             }
             catch (Exception ex)
@@ -73,14 +126,25 @@ namespace TailInstallationSystem.View
         {
             try
             {
-                // statusLabel.Text = "正在停止系统...";
                 UpdateProgress(50);
+
+                StopStatusMonitoring();
+
                 await controller.StopSystem();
-                // statusLabel.Text = "系统已停止";
+
                 btnStart.Enabled = true;
                 btnStop.Enabled = false;
                 UpdateProgress(0);
-                UpdateConnectionStatus(false);
+
+                // 重置设备状态...
+                UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
+                UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
+                UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
+                UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
+
+                currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
+                currentStatusLabel.Text = "状态: 系统已停止";
+
                 LogManager.LogInfo("系统已停止");
             }
             catch (Exception ex)
@@ -89,6 +153,7 @@ namespace TailInstallationSystem.View
                 LogManager.LogError($"系统停止失败: {ex.Message}");
             }
         }
+
 
         private void btnSettings_Click(object sender, EventArgs e)
         {
@@ -103,14 +168,28 @@ namespace TailInstallationSystem.View
 
             if (result == DialogResult.Yes)
             {
+                // ✅ 立即停止定时器！
+                StopStatusMonitoring();
+
                 controller?.EmergencyStop();
-                // statusLabel.Text = "紧急停止";
+
                 btnStart.Enabled = true;
                 btnStop.Enabled = false;
                 UpdateProgress(0);
+
+                // 重置所有设备状态...
+                UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
+                UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
+                UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
+                UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
+
+                currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
+                currentStatusLabel.Text = "状态: 紧急停止";
+
                 LogManager.LogWarning("系统紧急停止");
             }
         }
+
 
         private void btnClearLog_Click(object sender, EventArgs e)
         {
@@ -153,6 +232,320 @@ namespace TailInstallationSystem.View
             pcStatusLabel.ForeColor = pcColor;
         }
 
+        /// <summary>
+        /// Update individual device status with specific state
+        /// </summary>
+        private void UpdateDeviceStatus(string deviceName, DeviceStatus status)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action<string, DeviceStatus>(UpdateDeviceStatus), deviceName, status);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(deviceName))
+            {
+                LogManager.LogWarning("UpdateDeviceStatus called with null or empty device name");
+                return;
+            }
+
+            Color statusColor;
+            string statusText;
+
+            switch (status)
+            {
+                case DeviceStatus.Connected:
+                    statusColor = Color.FromArgb(82, 196, 26);  // Green
+                    statusText = "已连接";
+                    break;
+                case DeviceStatus.Disconnected:
+                    statusColor = Color.FromArgb(255, 77, 79);   // Red
+                    statusText = "未连接";
+                    break;
+                case DeviceStatus.Waiting:
+                    statusColor = Color.FromArgb(250, 173, 20);  // Orange
+                    statusText = "等待数据";
+                    break;
+                case DeviceStatus.Working:
+                    statusColor = Color.FromArgb(24, 144, 255);  // Blue
+                    statusText = "工作中";
+                    break;
+                default:
+                    statusColor = Color.FromArgb(128, 128, 128); // Gray
+                    statusText = "未知状态";
+                    break;
+            }
+
+            try
+            {
+                switch (deviceName.ToUpper())
+                {
+                    case "PLC":
+                        plcIndicator.BackColor = statusColor;
+                        plcStatusLabel.Text = statusText;
+                        plcStatusLabel.ForeColor = statusColor;
+                        break;
+                    case "SCANNER":
+                        scannerIndicator.BackColor = statusColor;
+                        scannerStatusLabel.Text = statusText;
+                        scannerStatusLabel.ForeColor = statusColor;
+                        break;
+                    case "SCREWDRIVER":
+                        screwIndicator.BackColor = statusColor;
+                        screwStatusLabel.Text = statusText;
+                        screwStatusLabel.ForeColor = statusColor;
+                        break;
+                    case "PC":
+                        pcIndicator.BackColor = statusColor;
+                        pcStatusLabel.Text = statusText;
+                        pcStatusLabel.ForeColor = statusColor;
+                        break;
+                    default:
+                        LogManager.LogWarning($"Unknown device name: {deviceName}");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"Error updating device status for {deviceName}: {ex.Message}");
+            }
+        }
+
+        #region Communication Event Handlers
+
+        /// <summary>
+        /// Handle device connection status changes
+        /// </summary>
+        private void OnDeviceConnectionChanged(string deviceName, bool isConnected)
+        {
+            var status = isConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected;
+            UpdateDeviceStatus(deviceName, status);
+
+            string statusText = isConnected ? "已连接" : "断开连接";
+            LogManager.LogInfo($"设备状态变化: {deviceName} {statusText}");
+        }
+
+        /// <summary>
+        /// Handle PC data received
+        /// </summary>
+        private void OnDataReceived(string data)
+        {
+            UpdateDeviceStatus("PC", DeviceStatus.Working);
+            LogManager.LogInfo("PC接收到工序数据");
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(2000);
+
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        BeginInvoke(new Action(() =>
+                        {
+                            try
+                            {
+                                UpdateDeviceStatus("PC", DeviceStatus.Waiting);
+                            }
+                            catch (Exception ex)
+                            {
+                                LogManager.LogError($"PC状态更新异常: {ex.Message}");
+                            }
+                        }));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"PC状态重置任务异常: {ex.Message}");
+                }
+            });
+        }
+
+
+        /// <summary>
+        /// Handle barcode scanned
+        /// </summary>
+        private void OnBarcodeScanned(string barcode)
+        {
+            try
+            {
+                // 确保在UI线程中执行UI更新
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action<string>(OnBarcodeScanned), barcode);
+                    return;
+                }
+
+                // 立即更新为工作状态
+                UpdateDeviceStatus("Scanner", DeviceStatus.Working);
+                LogManager.LogInfo($"扫码枪扫描到条码: {barcode}");
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(1000);
+
+                        // 回到UI线程更新状态
+                        if (!IsDisposed && IsHandleCreated)
+                        {
+                            BeginInvoke(new Action(() =>
+                            {
+                                try
+                                {
+                                    UpdateDeviceStatus("Scanner", DeviceStatus.Connected);
+                                }
+                                catch (Exception ex)
+                                {
+                                    LogManager.LogError($"扫码枪状态重置异常: {ex.Message}");
+                                }
+                            }));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogManager.LogError($"扫码枪状态重置任务异常: {ex.Message}");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"扫码枪事件处理异常: {ex.Message}");
+            }
+        }
+
+
+        /// <summary>
+        /// Handle screw driver data received
+        /// </summary>
+        private void OnScrewDataReceived(string screwData)
+        {
+            UpdateDeviceStatus("ScrewDriver", DeviceStatus.Working);
+            LogManager.LogInfo("螺丝机执行安装操作");
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(3000);
+
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        BeginInvoke(new Action(() =>
+                        {
+                            try
+                            {
+                                UpdateDeviceStatus("ScrewDriver", DeviceStatus.Connected);
+                            }
+                            catch (Exception ex)
+                            {
+                                LogManager.LogError($"ScrewDriver状态更新异常: {ex.Message}");
+                            }
+                        }));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"ScrewDriver状态重置任务异常: {ex.Message}");
+                }
+            });
+        }
+
+
+        #endregion
+
+        #region Business Process Event Handlers
+
+        /// <summary>
+        /// Handle business process status changes from controller
+        /// </summary>
+        private void OnProcessStatusChanged(string barcode, string status)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action<string, string>(OnProcessStatusChanged), barcode, status);
+                return;
+            }
+
+            currentStatusLabel.Text = $"状态: {status}";
+            LogManager.LogInfo($"业务流程状态: {status}");
+        }
+
+        /// <summary>
+        /// Handle current product changes from controller
+        /// </summary>
+        private void OnCurrentProductChanged(string barcode, string status)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action<string, string>(OnCurrentProductChanged), barcode, status);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(barcode))
+            {
+                currentBarcodeLabel.Text = $"当前产品条码: {barcode}";
+            }
+            currentStatusLabel.Text = $"状态: {status}";
+        }
+
+        #endregion
+
+        #region Status Monitoring Timer
+
+        /// <summary>
+        /// Initialize the status checking timer
+        /// </summary>
+        private void InitializeStatusTimer()
+        {
+            statusCheckTimer = new Timer();
+            statusCheckTimer.Interval = 5000; // Check every 5 seconds
+            statusCheckTimer.Tick += OnStatusTimerTick;
+        }
+
+        /// <summary>
+        /// Timer tick event for periodic status checking
+        /// </summary>
+        private void OnStatusTimerTick(object sender, EventArgs e)
+        {
+            if (commManager == null || !btnStop.Enabled || statusCheckTimer?.Enabled != true)
+            {
+                return;
+            }
+
+            try
+            {
+                 //LogManager.LogDebug("执行定期设备状态检查");
+
+                // 实际的健康检查逻辑...
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"状态检查异常: {ex.Message}");
+            }
+        }
+
+
+        /// <summary>
+        /// Start the status monitoring timer
+        /// </summary>
+        private void StartStatusMonitoring()
+        {
+            statusCheckTimer?.Start();
+            LogManager.LogInfo("设备状态监控已启动");
+        }
+
+        /// <summary>
+        /// Stop the status monitoring timer  
+        /// </summary>
+        private void StopStatusMonitoring()
+        {
+            statusCheckTimer?.Stop();
+            LogManager.LogInfo("设备状态监控已停止");
+        }
+
+        #endregion
+
         public void UpdateCurrentProduct(string barcode, string status)
         {
             if (InvokeRequired)
@@ -164,11 +557,40 @@ namespace TailInstallationSystem.View
             currentStatusLabel.Text = $"状态: {status}";
         }
 
+        /// <summary>
+        /// Public method for external device status updates (called by MainWindow)
+        /// </summary>
+        public void UpdateExternalDeviceStatus(string deviceName, bool isConnected)
+        {
+            var status = isConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected;
+            UpdateDeviceStatus(deviceName, status);
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
                 LogManager.OnLogWritten -= OnLogMessage;
+
+                // Unsubscribe from communication events
+                if (commManager != null)
+                {
+                    commManager.OnDeviceConnectionChanged -= OnDeviceConnectionChanged;
+                    commManager.OnDataReceived -= OnDataReceived;
+                    commManager.OnBarcodeScanned -= OnBarcodeScanned;
+                    commManager.OnScrewDataReceived -= OnScrewDataReceived;
+                }
+
+                // Unsubscribe from controller business events
+                if (controller != null)
+                {
+                    controller.OnProcessStatusChanged -= OnProcessStatusChanged;
+                    controller.OnCurrentProductChanged -= OnCurrentProductChanged;
+                }
+
+                // Stop and dispose timer
+                statusCheckTimer?.Stop();
+                statusCheckTimer?.Dispose();
             }
             base.Dispose(disposing);
         }

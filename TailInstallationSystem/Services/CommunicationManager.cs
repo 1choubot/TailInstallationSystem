@@ -22,6 +22,8 @@ namespace TailInstallationSystem
         // 前端PC数据接收 (TCP)
         private Socket socket_PC = null;
         private bool connectSuccess_PC = false;
+        private TcpListener pcListener;
+        private bool pcServerRunning = false;
 
         // 扫码枪通讯 (TCP)
         private Socket socketCore_Scanner = null;
@@ -205,34 +207,59 @@ namespace TailInstallationSystem
         {
             try
             {
-                if (socket_PC != null)
+                if (_config.PC.IsServer)
                 {
-                    socket_PC.Close();
-                    socket_PC = null;
-                }
+                    // 服务端模式
+                    pcListener = new TcpListener(System.Net.IPAddress.Any, _config.PC.Port);
+                    pcListener.Start();
+                    pcServerRunning = true;
+                    LogManager.LogInfo($"PC服务端监听启动: 端口{_config.PC.Port}");
 
-                socket_PC = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                socket_PC.ReceiveTimeout = _config.PC.TimeoutSeconds * 1000;
-                socket_PC.SendTimeout = _config.PC.TimeoutSeconds * 1000;
+                    // 异步接收连接
+                    _ = Task.Run(async () =>
+                    {
+                        while (pcServerRunning)
+                        {
+                            var client = await pcListener.AcceptTcpClientAsync();
+                            _ = Task.Run(() => HandlePCClient(client));
+                        }
+                    });
 
-                var connectTask = socket_PC.ConnectAsync(_config.PC.IP, _config.PC.Port);
-                var timeoutTask = Task.Delay(_config.PC.TimeoutSeconds * 1000);
-                var completedTask = await Task.WhenAny(connectTask, timeoutTask);
-
-                if (completedTask == connectTask && socket_PC.Connected)
-                {
-                    connectSuccess_PC = true;
-                    LogManager.LogInfo($"PC TCP连接成功: {_config.PC.IP}:{_config.PC.Port}");
-
-                    // 启动数据接收
-                    _ = Task.Run(ReceivePCData);
+                    OnDeviceConnectionChanged?.Invoke("PC", true);
                     return true;
                 }
                 else
                 {
-                    connectSuccess_PC = false;
-                    LogManager.LogWarning($"PC TCP连接超时: {_config.PC.IP}:{_config.PC.Port}");
-                    return false;
+                    // 客户端模式（原有实现）
+                    if (socket_PC != null)
+                    {
+                        socket_PC.Close();
+                        socket_PC = null;
+                    }
+
+                    socket_PC = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    socket_PC.ReceiveTimeout = _config.PC.TimeoutSeconds * 1000;
+                    socket_PC.SendTimeout = _config.PC.TimeoutSeconds * 1000;
+
+                    var connectTask = socket_PC.ConnectAsync(_config.PC.IP, _config.PC.Port);
+                    var timeoutTask = Task.Delay(_config.PC.TimeoutSeconds * 1000);
+                    var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+
+                    if (completedTask == connectTask && socket_PC.Connected)
+                    {
+                        connectSuccess_PC = true;
+                        LogManager.LogInfo($"PC TCP连接成功: {_config.PC.IP}:{_config.PC.Port}");
+
+                        // 启动数据接收
+                        _ = Task.Run(ReceivePCData);
+                        return true;
+                    }
+                    else
+                    {
+                        connectSuccess_PC = false;
+                        LogManager.LogWarning($"PC TCP连接超时: {_config.PC.IP}:{_config.PC.Port}");
+                        return false;
+                    }
                 }
             }
             catch (Exception ex)
@@ -240,6 +267,28 @@ namespace TailInstallationSystem
                 connectSuccess_PC = false;
                 LogManager.LogWarning($"PC TCP连接失败: {ex.Message}");
                 return false;
+            }
+        }
+
+        private void HandlePCClient(TcpClient client)
+        {
+            try
+            {
+                using (var stream = client.GetStream())
+                {
+                    byte[] buffer = new byte[_config.PC.BufferSize];
+                    int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                    if (bytesRead > 0)
+                    {
+                        string json = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                        LogManager.LogInfo($"收到PC工序JSON数据: {json}");
+                        OnDataReceived?.Invoke(json); // 触发事件，业务层处理
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"PC客户端数据处理异常: {ex.Message}");
             }
         }
 
@@ -586,6 +635,14 @@ namespace TailInstallationSystem
 
                         socket_ScrewDriver?.Close();
                         socket_ScrewDriver = null;
+
+                        // 关闭PC服务端监听
+                        if (pcListener != null)
+                        {
+                            pcServerRunning = false;
+                            pcListener.Stop();
+                            pcListener = null;
+                        }
 
                         LogManager.LogInfo("通讯管理器资源已释放");
                     }

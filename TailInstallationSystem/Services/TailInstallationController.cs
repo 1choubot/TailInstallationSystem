@@ -19,6 +19,20 @@ namespace TailInstallationSystem
         private string cachedBarcode = null;
         private readonly object barcodeLock = new object();
 
+        #region Events
+
+        /// <summary>
+        /// Business process status update event
+        /// </summary>
+        public event Action<string, string> OnProcessStatusChanged;
+
+        /// <summary>
+        /// Current product update event
+        /// </summary>
+        public event Action<string, string> OnCurrentProductChanged;
+
+        #endregion
+
         public TailInstallationController(CommunicationManager communicationManager)
         {
             commManager = communicationManager;
@@ -78,15 +92,20 @@ namespace TailInstallationSystem
                 receivedProcessData.Add(jsonData);
                 LogManager.LogInfo($"接收到工序数据: {jsonData.Substring(0, Math.Min(50, jsonData.Length))}...");
 
+                // Trigger process status update
+                OnProcessStatusChanged?.Invoke("", $"已接收 {receivedProcessData.Count}/3 道工序数据");
+
                 // 检查是否收齐数据
                 if (receivedProcessData.Count >= 3)
                 {
                     LogManager.LogInfo("前三道工序数据已收齐，准备执行尾椎安装");
+                    OnProcessStatusChanged?.Invoke("", "工序数据已收齐，等待PLC触发");
                 }
             }
             catch (Exception ex)
             {
                 LogManager.LogError($"处理接收数据异常: {ex.Message}");
+                OnProcessStatusChanged?.Invoke("", $"数据处理异常: {ex.Message}");
             }
         }
 
@@ -95,21 +114,33 @@ namespace TailInstallationSystem
             lock (barcodeLock)
             {
                 LogManager.LogInfo($"扫描到条码: {barcode}");
-
-                // 缓存扫码数据
                 cachedBarcode = barcode;
                 LogManager.LogInfo($"条码已缓存: {barcode}");
 
-                // 如果正在等待条码扫描，则完成等待任务
+                OnCurrentProductChanged?.Invoke(barcode, "已扫描条码");
+
                 if (barcodeWaitTask != null && !barcodeWaitTask.Task.IsCompleted)
                 {
                     LogManager.LogInfo("条码扫描等待任务已完成");
-                    barcodeWaitTask.SetResult(barcode);
+
+                    Task.Run(() =>
+                    {
+                        try
+                        {
+                            barcodeWaitTask.SetResult(barcode);
+                        }
+                        catch (Exception ex)
+                        {
+                            LogManager.LogError($"完成等待任务异常: {ex.Message}");
+                        }
+                    });
+
                     barcodeWaitTask = null;
-                    cachedBarcode = null; // 清空缓存（已使用）
+                    cachedBarcode = null;
                 }
             }
         }
+
 
         private void ProcessScrewData(string screwData)
         {
@@ -125,49 +156,64 @@ namespace TailInstallationSystem
                 if (receivedProcessData.Count < 3)
                 {
                     LogManager.LogWarning("前三道工序数据不完整，无法执行尾椎安装");
+                    OnProcessStatusChanged?.Invoke("", "前三道工序数据不完整");
                     return;
                 }
 
                 LogManager.LogInfo("开始执行尾椎安装工序");
+                OnProcessStatusChanged?.Invoke("", "开始执行尾椎安装");
 
                 // 1. 等待条码扫描
+                OnProcessStatusChanged?.Invoke("", "等待条码扫描");
                 string barcode = await WaitForBarcodeScan();
+                OnCurrentProductChanged?.Invoke(barcode, "等待螺丝安装");
 
                 // 2. 执行螺丝安装
+                OnProcessStatusChanged?.Invoke(barcode, "执行螺丝安装");
                 var screwResult = await PerformScrewInstallation();
+                OnCurrentProductChanged?.Invoke(barcode, "螺丝安装完成");
 
                 // 3. 生成本工序数据
+                OnProcessStatusChanged?.Invoke(barcode, "生成工序数据");
                 var tailProcessData = GenerateTailProcessData(barcode, screwResult);
 
                 // 4. 整合所有数据
+                OnProcessStatusChanged?.Invoke(barcode, "整合数据");
                 var completeData = CombineAllProcessData(tailProcessData);
 
                 // 5. 保存到本地数据库
+                OnProcessStatusChanged?.Invoke(barcode, "保存数据");
                 await dataManager.SaveProductData(barcode, receivedProcessData.ToArray(), tailProcessData, completeData);
 
                 // 6. 上传到服务器
+                OnProcessStatusChanged?.Invoke(barcode, "上传数据");
                 bool uploadSuccess = await dataManager.UploadToServer(barcode, completeData);
 
                 if (uploadSuccess)
                 {
                     LogManager.LogInfo($"产品 {barcode} 数据上传成功");
+                    OnCurrentProductChanged?.Invoke(barcode, "数据上传成功");
                 }
                 else
                 {
                     LogManager.LogWarning($"产品 {barcode} 数据上传失败，已加入重试队列");
+                    OnCurrentProductChanged?.Invoke(barcode, "数据上传失败");
                 }
 
                 LogManager.LogInfo("尾椎安装工序完成");
+                OnProcessStatusChanged?.Invoke(barcode, "尾椎安装完成");
             }
             catch (Exception ex)
             {
                 LogManager.LogError($"尾椎安装异常: {ex.Message}");
+                OnProcessStatusChanged?.Invoke("", $"安装异常: {ex.Message}");
             }
             finally
             {
                 // 清空已处理的数据，准备下一个产品
                 LogManager.LogInfo("清空已处理的工序数据，准备处理下一个产品");
                 receivedProcessData.Clear();
+                OnProcessStatusChanged?.Invoke("", "等待下一个产品");
             }
         }
 
@@ -235,7 +281,7 @@ namespace TailInstallationSystem
 
             var testItems = new[]
             {
-                new 
+                new
                 {
                     Id = 37,
                     ItemName = "尾椎安装扭矩",

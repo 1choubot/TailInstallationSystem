@@ -30,6 +30,7 @@
         {
             this.contentPanel = new AntdUI.Panel();
             this.logPanel = new AntdUI.Panel();
+            this.logTextBox = new System.Windows.Forms.TextBox();
             this.btnClearLog = new AntdUI.Button();
             this.logTitle = new AntdUI.Label();
             this.dataPanel = new AntdUI.Panel();
@@ -59,7 +60,6 @@
             this.plcIndicator = new AntdUI.Panel();
             this.plcStatusLabel = new AntdUI.Label();
             this.plcTitleLabel = new AntdUI.Label();
-            this.logTextBox = new System.Windows.Forms.TextBox();
             this.contentPanel.SuspendLayout();
             this.logPanel.SuspendLayout();
             this.dataPanel.SuspendLayout();
@@ -96,6 +96,19 @@
             this.logPanel.Name = "logPanel";
             this.logPanel.Size = new System.Drawing.Size(551, 479);
             this.logPanel.TabIndex = 3;
+            // 
+            // logTextBox
+            // 
+            this.logTextBox.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(250)))), ((int)(((byte)(250)))));
+            this.logTextBox.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.logTextBox.Font = new System.Drawing.Font("Consolas", 9F);
+            this.logTextBox.Location = new System.Drawing.Point(0, 30);
+            this.logTextBox.Multiline = true;
+            this.logTextBox.Name = "logTextBox";
+            this.logTextBox.ReadOnly = true;
+            this.logTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+            this.logTextBox.Size = new System.Drawing.Size(551, 419);
+            this.logTextBox.TabIndex = 3;
             // 
             // btnClearLog
             // 
@@ -185,14 +198,14 @@
             // 
             // btnEmergencyStop
             // 
-            this.btnEmergencyStop.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(0)))), ((int)(((byte)(0)))));
+            this.btnEmergencyStop.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(51)))), ((int)(((byte)(217)))), ((int)(((byte)(67)))));
             this.btnEmergencyStop.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
-            this.btnEmergencyStop.ForeColor = System.Drawing.Color.White;
+            this.btnEmergencyStop.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(236)))), ((int)(((byte)(23)))), ((int)(((byte)(23)))));
             this.btnEmergencyStop.Location = new System.Drawing.Point(800, 20);
             this.btnEmergencyStop.Name = "btnEmergencyStop";
             this.btnEmergencyStop.Size = new System.Drawing.Size(120, 45);
             this.btnEmergencyStop.TabIndex = 3;
-            this.btnEmergencyStop.Text = "🚨 紧急停止";
+            this.btnEmergencyStop.Text = "紧急停止";
             // 
             // btnSettings
             // 
@@ -394,19 +407,6 @@
             this.plcTitleLabel.Size = new System.Drawing.Size(150, 23);
             this.plcTitleLabel.TabIndex = 0;
             this.plcTitleLabel.Text = "PLC连接";
-            // 
-            // logTextBox
-            // 
-            this.logTextBox.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(250)))), ((int)(((byte)(250)))));
-            this.logTextBox.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.logTextBox.Font = new System.Drawing.Font("Consolas", 9F);
-            this.logTextBox.Location = new System.Drawing.Point(0, 30);
-            this.logTextBox.Multiline = true;
-            this.logTextBox.Name = "logTextBox";
-            this.logTextBox.ReadOnly = true;
-            this.logTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.logTextBox.Size = new System.Drawing.Size(551, 419);
-            this.logTextBox.TabIndex = 3;
             // 
             // SystemMonitorControl
             // 
