@@ -54,11 +54,23 @@ namespace TailInstallationSystem.View
             // Initialize status check timer
             InitializeStatusTimer();
             
-            // Initialize all devices to disconnected state
+            // Initialize all devices to disconnected state and set default messages
+            InitializeDefaultState();
+        }
+
+        /// <summary>
+        /// Initialize the default UI state
+        /// </summary>
+        private void InitializeDefaultState()
+        {
             UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
             UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
             UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
             UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
+            
+            // Set default product information
+            currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
+            currentStatusLabel.Text = "状态: 系统未启动";
         }
 
         private void OnLogMessage(LogManager.LogLevel level, string timestamp, string message)
@@ -96,6 +108,9 @@ namespace TailInstallationSystem.View
                 // Start status monitoring
                 StartStatusMonitoring();
                 
+                // Update system status
+                currentStatusLabel.Text = "状态: 系统运行中";
+                
                 LogManager.LogInfo("系统启动成功");
             }
             catch (Exception ex)
@@ -128,6 +143,10 @@ namespace TailInstallationSystem.View
                 UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
+                
+                // Reset system status
+                currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
+                currentStatusLabel.Text = "状态: 系统已停止";
                 
                 LogManager.LogInfo("系统已停止");
             }
@@ -166,6 +185,10 @@ namespace TailInstallationSystem.View
                 UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
+                
+                // Reset system status 
+                currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
+                currentStatusLabel.Text = "状态: 紧急停止";
                 
                 LogManager.LogWarning("系统紧急停止");
             }
@@ -223,6 +246,12 @@ namespace TailInstallationSystem.View
                 return;
             }
 
+            if (string.IsNullOrEmpty(deviceName))
+            {
+                LogManager.LogWarning("UpdateDeviceStatus called with null or empty device name");
+                return;
+            }
+
             Color statusColor;
             string statusText;
 
@@ -250,28 +279,38 @@ namespace TailInstallationSystem.View
                     break;
             }
 
-            switch (deviceName.ToUpper())
+            try
             {
-                case "PLC":
-                    plcIndicator.BackColor = statusColor;
-                    plcStatusLabel.Text = statusText;
-                    plcStatusLabel.ForeColor = statusColor;
-                    break;
-                case "SCANNER":
-                    scannerIndicator.BackColor = statusColor;
-                    scannerStatusLabel.Text = statusText;
-                    scannerStatusLabel.ForeColor = statusColor;
-                    break;
-                case "SCREWDRIVER":
-                    screwIndicator.BackColor = statusColor;
-                    screwStatusLabel.Text = statusText;
-                    screwStatusLabel.ForeColor = statusColor;
-                    break;
-                case "PC":
-                    pcIndicator.BackColor = statusColor;
-                    pcStatusLabel.Text = statusText;
-                    pcStatusLabel.ForeColor = statusColor;
-                    break;
+                switch (deviceName.ToUpper())
+                {
+                    case "PLC":
+                        plcIndicator.BackColor = statusColor;
+                        plcStatusLabel.Text = statusText;
+                        plcStatusLabel.ForeColor = statusColor;
+                        break;
+                    case "SCANNER":
+                        scannerIndicator.BackColor = statusColor;
+                        scannerStatusLabel.Text = statusText;
+                        scannerStatusLabel.ForeColor = statusColor;
+                        break;
+                    case "SCREWDRIVER":
+                        screwIndicator.BackColor = statusColor;
+                        screwStatusLabel.Text = statusText;
+                        screwStatusLabel.ForeColor = statusColor;
+                        break;
+                    case "PC":
+                        pcIndicator.BackColor = statusColor;
+                        pcStatusLabel.Text = statusText;
+                        pcStatusLabel.ForeColor = statusColor;
+                        break;
+                    default:
+                        LogManager.LogWarning($"Unknown device name: {deviceName}");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"Error updating device status for {deviceName}: {ex.Message}");
             }
         }
 
@@ -298,7 +337,16 @@ namespace TailInstallationSystem.View
             LogManager.LogInfo("PC接收到工序数据");
             
             // Set PC back to waiting status after a short delay
-            Task.Delay(2000).ContinueWith(_ => UpdateDeviceStatus("PC", DeviceStatus.Waiting));
+            Task.Delay(2000).ContinueWith(_ => {
+                try
+                {
+                    UpdateDeviceStatus("PC", DeviceStatus.Waiting);
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"PC状态更新异常: {ex.Message}");
+                }
+            }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
         /// <summary>
@@ -310,7 +358,16 @@ namespace TailInstallationSystem.View
             LogManager.LogInfo($"扫码枪扫描到条码: {barcode}");
             
             // Set scanner back to connected status after scanning
-            Task.Delay(1000).ContinueWith(_ => UpdateDeviceStatus("Scanner", DeviceStatus.Connected));
+            Task.Delay(1000).ContinueWith(_ => {
+                try
+                {
+                    UpdateDeviceStatus("Scanner", DeviceStatus.Connected);
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"Scanner状态更新异常: {ex.Message}");
+                }
+            }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
         /// <summary>
@@ -322,7 +379,16 @@ namespace TailInstallationSystem.View
             LogManager.LogInfo("螺丝机执行安装操作");
             
             // Set screw driver back to connected status after operation
-            Task.Delay(3000).ContinueWith(_ => UpdateDeviceStatus("ScrewDriver", DeviceStatus.Connected));
+            Task.Delay(3000).ContinueWith(_ => {
+                try
+                {
+                    UpdateDeviceStatus("ScrewDriver", DeviceStatus.Connected);
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"ScrewDriver状态更新异常: {ex.Message}");
+                }
+            }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
         #endregion
@@ -381,7 +447,7 @@ namespace TailInstallationSystem.View
         /// </summary>
         private void OnStatusTimerTick(object sender, EventArgs e)
         {
-            if (commManager == null) return;
+            if (commManager == null || !btnStop.Enabled) return;
 
             try
             {
@@ -392,6 +458,11 @@ namespace TailInstallationSystem.View
                 // The actual connection status should come from CommunicationManager events
                 // This timer serves as a backup check and can trigger reconnection attempts
                 LogManager.LogDebug("执行定期设备状态检查");
+                
+                // You could add additional health checks here, such as:
+                // - Ping network devices
+                // - Check socket connection state
+                // - Validate communication heartbeat
             }
             catch (Exception ex)
             {
