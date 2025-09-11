@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using TailInstallationSystem.Models;
 
 namespace TailInstallationSystem
 {
@@ -11,6 +13,11 @@ namespace TailInstallationSystem
         private DataManager dataManager;
         private List<string> receivedProcessData = new List<string>();
         private bool isRunning = false;
+        private TaskCompletionSource<string> barcodeWaitTask;
+
+        // 扫码缓存机制
+        private string cachedBarcode = null;
+        private readonly object barcodeLock = new object();
 
         public TailInstallationController(CommunicationManager communicationManager)
         {
@@ -58,7 +65,6 @@ namespace TailInstallationSystem
                 }
                 catch (Exception ex)
                 {
-                    // 记录异常日志
                     LogManager.LogError($"主工作循环异常: {ex.Message}");
                 }
             }
@@ -86,8 +92,23 @@ namespace TailInstallationSystem
 
         private void ProcessBarcodeData(string barcode)
         {
-            LogManager.LogInfo($"扫描到条码: {barcode}");
-            // 验证条码格式等
+            lock (barcodeLock)
+            {
+                LogManager.LogInfo($"扫描到条码: {barcode}");
+
+                // 缓存扫码数据
+                cachedBarcode = barcode;
+                LogManager.LogInfo($"条码已缓存: {barcode}");
+
+                // 如果正在等待条码扫描，则完成等待任务
+                if (barcodeWaitTask != null && !barcodeWaitTask.Task.IsCompleted)
+                {
+                    LogManager.LogInfo("条码扫描等待任务已完成");
+                    barcodeWaitTask.SetResult(barcode);
+                    barcodeWaitTask = null;
+                    cachedBarcode = null; // 清空缓存（已使用）
+                }
+            }
         }
 
         private void ProcessScrewData(string screwData)
@@ -125,7 +146,7 @@ namespace TailInstallationSystem
                 await dataManager.SaveProductData(barcode, receivedProcessData.ToArray(), tailProcessData, completeData);
 
                 // 6. 上传到服务器
-                bool uploadSuccess = await dataManager.UploadToServer(completeData);
+                bool uploadSuccess = await dataManager.UploadToServer(barcode, completeData);
 
                 if (uploadSuccess)
                 {
@@ -136,55 +157,127 @@ namespace TailInstallationSystem
                     LogManager.LogWarning($"产品 {barcode} 数据上传失败，已加入重试队列");
                 }
 
-                // 清空已处理的数据
-                receivedProcessData.Clear();
-
                 LogManager.LogInfo("尾椎安装工序完成");
             }
             catch (Exception ex)
             {
                 LogManager.LogError($"尾椎安装异常: {ex.Message}");
             }
+            finally
+            {
+                // 清空已处理的数据，准备下一个产品
+                LogManager.LogInfo("清空已处理的工序数据，准备处理下一个产品");
+                receivedProcessData.Clear();
+            }
         }
 
         private async Task<string> WaitForBarcodeScan()
         {
-            // 实现等待条码扫描的逻辑
-            // 这里简化处理，实际应该有超时机制
-            return await Task.FromResult("C123456");
+            LogManager.LogInfo("等待条码扫描...");
+
+            lock (barcodeLock)
+            {
+                // 如果已经有缓存的条码，直接使用
+                if (!string.IsNullOrEmpty(cachedBarcode))
+                {
+                    LogManager.LogInfo($"使用缓存的条码: {cachedBarcode}");
+                    string result = cachedBarcode;
+                    cachedBarcode = null; // 清空缓存
+                    return result;
+                }
+            }
+
+            LogManager.LogInfo("缓存中无条码，等待新的扫码数据...");
+
+            // 创建等待任务
+            barcodeWaitTask = new TaskCompletionSource<string>();
+
+            // 设置超时（30秒）
+            var timeoutTask = Task.Delay(30000);
+            var completedTask = await Task.WhenAny(barcodeWaitTask.Task, timeoutTask);
+
+            if (completedTask == barcodeWaitTask.Task)
+            {
+                LogManager.LogInfo("条码扫描完成");
+                return barcodeWaitTask.Task.Result;
+            }
+            else
+            {
+                LogManager.LogError("等待条码扫描超时（30秒）");
+                throw new TimeoutException("等待条码扫描超时");
+            }
         }
 
         private async Task<ScrewInstallationResult> PerformScrewInstallation()
         {
-            // 实现螺丝安装逻辑
-            await Task.Delay(2000); // 模拟安装时间
+            LogManager.LogInfo("开始执行螺丝安装...");
 
+            // 发送螺丝机启动命令
+            await commManager.SendScrewDriverCommand("START_SCREW_INSTALLATION");
+
+            // 等待螺丝安装完成（实际应该监听螺丝机返回的完成信号）
+            await Task.Delay(5000); // 预计安装时间
+
+            LogManager.LogInfo("螺丝安装完成");
+
+            // 实际项目中应该解析螺丝机返回的真实扭矩数据
             return new ScrewInstallationResult
             {
-                Torque = 2.5m,
+                Torque = 2.5m, // 这里应该从螺丝机实际返回数据中解析
                 InstallTime = DateTime.Now,
-                Success = true
+                Success = true // 这里应该根据螺丝机返回的状态判断
             };
         }
 
         private string GenerateTailProcessData(string barcode, ScrewInstallationResult screwResult)
         {
-            var processData = new
+            LogManager.LogInfo($"生成尾椎安装工序数据: {barcode}");
+
+            var testItems = new[]
             {
-                processName = "安装尾椎",
-                timestamp = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                barcodes = new[]
+                new 
                 {
-                    new { codeType = "C", barcode = barcode }
-                },
-                testItems = new[]
-                {
-                    new { id = 37, itemName = "尾椎安装至C壳", itemType = 0, pass = true, resultText = "完成" },
-                    new { id = 38, itemName = "螺丝扭矩检测", itemType = 1, pass = screwResult.Success, resultText = $"{screwResult.Torque}Nm" }
+                    Id = 37,
+                    ItemName = "尾椎安装扭矩",
+                    ItemType = "Torque"
                 }
             };
 
-            return JsonConvert.SerializeObject(processData, Formatting.Indented);
+            var processData = new
+            {
+                processName = "安装尾椎",
+                barcodes = new[]
+                {
+                    new { codeType = "A", barcode = barcode }
+                },
+                testItems = testItems.Select(item => new
+                {
+                    id = item.Id,
+                    itemName = item.ItemName,
+                    itemType = item.ItemType,
+                    pass = screwResult.Success,
+                    resultText = screwResult.Success ? "扭矩达标" : "扭矩不足",
+                    // 添加扭矩详细数据作为子项
+                    subItems = item.Id == 37 ? new[]
+                    {
+                        new
+                        {
+                            name = "Torque",
+                            value = (double)screwResult.Torque,
+                            unit = "Nm",
+                            pass = screwResult.Success
+                        }
+                    } : null
+                }).ToArray()
+            };
+
+            string jsonResult = JsonConvert.SerializeObject(processData, Formatting.Indented);
+            LogManager.LogInfo($"尾椎安装工序数据生成完成");
+            LogManager.LogInfo($"测试项数量: {testItems.Length}");
+            LogManager.LogInfo($"扭矩值: {screwResult.Torque}Nm");
+            LogManager.LogInfo($"测试结果: {(screwResult.Success ? "通过" : "失败")}");
+
+            return jsonResult;
         }
 
         private string CombineAllProcessData(string tailProcessData)
@@ -200,7 +293,10 @@ namespace TailInstallationSystem
             // 添加尾椎安装数据
             allProcesses.Add(JsonConvert.DeserializeObject(tailProcessData));
 
-            return JsonConvert.SerializeObject(allProcesses, Formatting.Indented);
+            string combinedData = JsonConvert.SerializeObject(allProcesses, Formatting.Indented);
+            LogManager.LogInfo($"合并所有工序数据完成，总共 {allProcesses.Count} 道工序");
+
+            return combinedData;
         }
 
         public void EmergencyStop()
@@ -209,6 +305,19 @@ namespace TailInstallationSystem
             {
                 isRunning = false;
                 LogManager.LogWarning("执行紧急停止");
+
+                // 清理等待任务
+                if (barcodeWaitTask != null && !barcodeWaitTask.Task.IsCompleted)
+                {
+                    barcodeWaitTask.SetCanceled();
+                    barcodeWaitTask = null;
+                }
+
+                // 清空缓存
+                lock (barcodeLock)
+                {
+                    cachedBarcode = null;
+                }
 
                 // 立即断开所有连接
                 commManager?.Dispose();

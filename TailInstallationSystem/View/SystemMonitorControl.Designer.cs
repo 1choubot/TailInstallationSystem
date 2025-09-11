@@ -31,7 +31,6 @@
             this.contentPanel = new AntdUI.Panel();
             this.logPanel = new AntdUI.Panel();
             this.btnClearLog = new AntdUI.Button();
-            this.logTextBox = new System.Windows.Forms.TextBox();
             this.logTitle = new AntdUI.Label();
             this.dataPanel = new AntdUI.Panel();
             this.currentProductPanel = new AntdUI.Panel();
@@ -60,6 +59,7 @@
             this.plcIndicator = new AntdUI.Panel();
             this.plcStatusLabel = new AntdUI.Label();
             this.plcTitleLabel = new AntdUI.Label();
+            this.logTextBox = new System.Windows.Forms.TextBox();
             this.contentPanel.SuspendLayout();
             this.logPanel.SuspendLayout();
             this.dataPanel.SuspendLayout();
@@ -88,8 +88,8 @@
             // 
             // logPanel
             // 
-            this.logPanel.Controls.Add(this.btnClearLog);
             this.logPanel.Controls.Add(this.logTextBox);
+            this.logPanel.Controls.Add(this.btnClearLog);
             this.logPanel.Controls.Add(this.logTitle);
             this.logPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.logPanel.Location = new System.Drawing.Point(500, 220);
@@ -108,19 +108,6 @@
             this.btnClearLog.Size = new System.Drawing.Size(551, 30);
             this.btnClearLog.TabIndex = 2;
             this.btnClearLog.Text = "清空日志";
-            // 
-            // logTextBox
-            // 
-            this.logTextBox.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(250)))), ((int)(((byte)(250)))));
-            this.logTextBox.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.logTextBox.Font = new System.Drawing.Font("Consolas", 9F);
-            this.logTextBox.Location = new System.Drawing.Point(0, 30);
-            this.logTextBox.Multiline = true;
-            this.logTextBox.Name = "logTextBox";
-            this.logTextBox.ReadOnly = true;
-            this.logTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.logTextBox.Size = new System.Drawing.Size(551, 449);
-            this.logTextBox.TabIndex = 1;
             // 
             // logTitle
             // 
@@ -408,6 +395,19 @@
             this.plcTitleLabel.TabIndex = 0;
             this.plcTitleLabel.Text = "PLC连接";
             // 
+            // logTextBox
+            // 
+            this.logTextBox.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(250)))), ((int)(((byte)(250)))));
+            this.logTextBox.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.logTextBox.Font = new System.Drawing.Font("Consolas", 9F);
+            this.logTextBox.Location = new System.Drawing.Point(0, 30);
+            this.logTextBox.Multiline = true;
+            this.logTextBox.Name = "logTextBox";
+            this.logTextBox.ReadOnly = true;
+            this.logTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+            this.logTextBox.Size = new System.Drawing.Size(551, 419);
+            this.logTextBox.TabIndex = 3;
+            // 
             // SystemMonitorControl
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
@@ -435,7 +435,6 @@
         private AntdUI.Panel contentPanel;
         private AntdUI.Panel logPanel;
         private AntdUI.Button btnClearLog;
-        private System.Windows.Forms.TextBox logTextBox;
         private AntdUI.Label logTitle;
         private AntdUI.Panel dataPanel;
         private AntdUI.Panel currentProductPanel;
@@ -464,5 +463,6 @@
         private AntdUI.Panel plcIndicator;
         private AntdUI.Label plcStatusLabel;
         private AntdUI.Label plcTitleLabel;
+        private System.Windows.Forms.TextBox logTextBox;
     }
 }

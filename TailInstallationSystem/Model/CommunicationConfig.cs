@@ -50,7 +50,7 @@ namespace TailInstallationSystem.Models
 
     public class ServerConfig
     {
-        public string WebSocketUrl { get; set; } = "ws://192.168.1.200:9090/ws";
+        public string WebSocketUrl { get; set; } = "ws://192.168.1.100:9001";
         public int RetryIntervalMinutes { get; set; } = 5;
         public int MaxRetryAttempts { get; set; } = 3;
         public string ApiKey { get; set; } = "";
