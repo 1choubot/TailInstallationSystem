@@ -11,6 +11,7 @@ namespace TailInstallationSystem
         private CommunicationManager commManager;
         private TailInstallationController controller;
         private UserControl currentUserControl;
+        private View.SystemMonitorControl systemMonitorControl;
 
         public MainWindow()
         {
@@ -21,7 +22,9 @@ namespace TailInstallationSystem
             // 启动时默认显示系统监控界面
             ShowSystemMonitor();
             UpdateMenuButtonState(btnSystemMonitor);
+
         }
+
 
         private void InitializeEvents()
         {
@@ -115,9 +118,11 @@ namespace TailInstallationSystem
 
         private void ShowSystemMonitor()
         {
-            // 切换到系统监控用户控件
-            var monitorControl = new View.SystemMonitorControl(controller, commManager);
-            SwitchUserControl(monitorControl);
+            if (systemMonitorControl == null)
+            {
+                systemMonitorControl = new View.SystemMonitorControl(controller, commManager);
+            }
+            SwitchUserControl(systemMonitorControl);
         }
 
         private void ShowCommunicationSettings()
@@ -246,10 +251,12 @@ namespace TailInstallationSystem
             InitializeCommunication();
             LogManager.LogInfo("通讯配置已更新，重新初始化通讯管理器");
 
-            // 如果当前显示的是系统监控界面，刷新它
+            // 重新创建监控界面以使用新的通讯管理器
+            systemMonitorControl?.Dispose();
+            systemMonitorControl = new View.SystemMonitorControl(controller, commManager);
             if (currentUserControl is View.SystemMonitorControl)
             {
-                ShowSystemMonitor(); // 重新创建监控界面以使用新的通讯管理器
+                SwitchUserControl(systemMonitorControl);
             }
         }
 

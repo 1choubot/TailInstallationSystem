@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
 using System.Text;
+using System.Drawing.Drawing2D;
+using System.Drawing;
 
 namespace TailInstallationSystem
 {
@@ -19,6 +21,8 @@ namespace TailInstallationSystem
         {
             InitializeComponent();
             InitializeControls();
+            dataGridView.CellPainting += DataGridView_CellPainting;
+
         }
 
         private void InitializeControls()
@@ -97,7 +101,7 @@ namespace TailInstallationSystem
             }
             finally
             {
-                SetButtonLoadingState(refreshButton, false, "🔄 刷新");
+                SetButtonLoadingState(refreshButton, false, "刷新");
             }
         }
 
@@ -378,18 +382,18 @@ namespace TailInstallationSystem
                 LogManager.LogInfo($"查看产品详情: {productData.Barcode}");
 
                 var detailInfo = $@"产品条码: {productData.Barcode}
-状态: {productData.Status}
-创建时间: {productData.CreatedTime}
-完成时间: {productData.CompletedTime}
-上传状态: {productData.IsUploaded}
-上传时间: {productData.UploadedTime}
+                                    状态: {productData.Status}
+                                    创建时间: {productData.CreatedTime}
+                                    完成时间: {productData.CompletedTime}
+                                    上传状态: {productData.IsUploaded}
+                                    上传时间: {productData.UploadedTime}
 
-详细数据:
-工序1数据: {productData.OriginalData?.Process1_Data ?? "N/A"}
-工序2数据: {productData.OriginalData?.Process2_Data ?? "N/A"}
-工序3数据: {productData.OriginalData?.Process3_Data ?? "N/A"}
-尾夹工序数据: {productData.OriginalData?.Process4_Data ?? "N/A"}
-完成数据: {productData.OriginalData?.CompleteData ?? "N/A"}";
+                                    详细数据:
+                                    工序1数据: {productData.OriginalData?.Process1_Data ?? "N/A"}
+                                    工序2数据: {productData.OriginalData?.Process2_Data ?? "N/A"}
+                                    工序3数据: {productData.OriginalData?.Process3_Data ?? "N/A"}
+                                    尾夹工序数据: {productData.OriginalData?.Process4_Data ?? "N/A"}
+                                    完成数据: {productData.OriginalData?.CompleteData ?? "N/A"}";
 
                 MessageBox.Show(detailInfo, $"产品详情 - {productData.Barcode}",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -407,6 +411,55 @@ namespace TailInstallationSystem
         public void RefreshData()
         {
             LoadData();
+        }
+
+
+        // 新增自定义绘制方法，查看详情按钮
+        private void DataGridView_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.ColumnIndex == actionsColumn.Index && e.RowIndex >= 0)
+            {
+                e.Handled = true;
+                e.PaintBackground(e.CellBounds, true);
+
+                // 按钮样式参数
+                var buttonRect = new Rectangle(e.CellBounds.Left + 10, e.CellBounds.Top + 6, e.CellBounds.Width - 20, e.CellBounds.Height - 12);
+                var buttonColor = Color.FromArgb(51, 153, 255); // 主色
+                var textColor = Color.White;
+                var borderRadius = 8;
+
+                // 绘制圆角按钮
+                using (GraphicsPath path = new GraphicsPath())
+                {
+                    path.AddArc(buttonRect.Left, buttonRect.Top, borderRadius, borderRadius, 180, 90);
+                    path.AddArc(buttonRect.Right - borderRadius, buttonRect.Top, borderRadius, borderRadius, 270, 90);
+                    path.AddArc(buttonRect.Right - borderRadius, buttonRect.Bottom - borderRadius, borderRadius, borderRadius, 0, 90);
+                    path.AddArc(buttonRect.Left, buttonRect.Bottom - borderRadius, borderRadius, borderRadius, 90, 90);
+                    path.CloseFigure();
+
+                    using (SolidBrush brush = new SolidBrush(buttonColor))
+                    {
+                        e.Graphics.FillPath(brush, path);
+                    }
+
+                    // 绘制边框（直接用同一个 path）
+                    using (Pen pen = new Pen(Color.FromArgb(41, 128, 185), 1))
+                    {
+                        e.Graphics.DrawPath(pen, path);
+                    }
+                }
+
+                // 绘制文字
+                var text = "查看详情";
+                var font = new Font("微软雅黑", 9F, FontStyle.Bold);
+                var textSize = e.Graphics.MeasureString(text, font);
+                var textX = buttonRect.Left + (buttonRect.Width - textSize.Width) / 2;
+                var textY = buttonRect.Top + (buttonRect.Height - textSize.Height) / 2;
+                using (SolidBrush textBrush = new SolidBrush(textColor))
+                {
+                    e.Graphics.DrawString(text, font, textBrush, textX, textY);
+                }
+            }
         }
     }
 

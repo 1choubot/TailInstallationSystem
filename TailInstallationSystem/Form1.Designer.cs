@@ -28,8 +28,8 @@
         /// </summary>
         private void InitializeComponent()
         {
-            AntdUI.MenuItem menuItem1 = new AntdUI.MenuItem();
-            AntdUI.MenuItem menuItem2 = new AntdUI.MenuItem();
+            AntdUI.MenuItem menuItem3 = new AntdUI.MenuItem();
+            AntdUI.MenuItem menuItem4 = new AntdUI.MenuItem();
             this.label1 = new AntdUI.Label();
             this.panel1 = new AntdUI.Panel();
             this.panelMain = new AntdUI.Panel();
@@ -71,12 +71,12 @@
             // 
             this.menu1.BackColor = System.Drawing.SystemColors.Control;
             this.menu1.Dock = System.Windows.Forms.DockStyle.Left;
-            menuItem1.Name = "AddUser";
-            menuItem1.Text = "添加用户";
-            menuItem2.Name = "DeleteUser";
-            menuItem2.Text = "删除用户";
-            this.menu1.Items.Add(menuItem1);
-            this.menu1.Items.Add(menuItem2);
+            menuItem3.Name = "AddUser";
+            menuItem3.Text = "添加用户";
+            menuItem4.Name = "DeleteUser";
+            menuItem4.Text = "删除用户";
+            this.menu1.Items.Add(menuItem3);
+            this.menu1.Items.Add(menuItem4);
             this.menu1.Location = new System.Drawing.Point(0, 0);
             this.menu1.Name = "menu1";
             this.menu1.Size = new System.Drawing.Size(196, 625);

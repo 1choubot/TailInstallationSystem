@@ -84,26 +84,28 @@ namespace TailInstallationSystem
             }
         }
 
-        private void LoadRecentLogs()
+        private async void LoadRecentLogs()
         {
             try
             {
                 UpdateStatus("正在加载日志...");
                 SetButtonState(refreshButton, false, "加载中...");
 
-                // 清空显示区域
+                // 清空显示区域和缓冲区
                 logDisplayTextBox.Clear();
+                logBuffer.Clear();
 
-                // 显示缓冲区中的日志 (最后500条)
-                var logsToShow = GetLastItems(logBuffer, 500);
-                foreach (var logLine in logsToShow)
+                // 从日志文件加载最近500条
+                var logs = await LogManager.GetRecentLogs(500);
+                foreach (var logLine in logs)
                 {
                     var level = ExtractLogLevel(logLine);
                     AppendLogToDisplay(logLine, level);
+                    logBuffer.Add(logLine);
                 }
 
                 lastDisplayedLogCount = logBuffer.Count;
-                UpdateStatus($"已加载 {Math.Min(logBuffer.Count, 500)} 条日志记录");
+                UpdateStatus($"已加载 {logs.Length} 条日志记录");
 
                 LogManager.LogInfo("日志显示已刷新");
             }
@@ -115,7 +117,7 @@ namespace TailInstallationSystem
             }
             finally
             {
-                SetButtonState(refreshButton, true, "🔄 刷新");
+                SetButtonState(refreshButton, true, "刷新");
             }
         }
 

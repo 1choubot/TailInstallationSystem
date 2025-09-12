@@ -33,7 +33,6 @@
             this.usernameHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.permissionHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.createdTimeHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
-            this.lastLoginHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.statusHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.contextMenuStrip = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.editUserMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -54,7 +53,6 @@
             this.usernameHeader,
             this.permissionHeader,
             this.createdTimeHeader,
-            this.lastLoginHeader,
             this.statusHeader});
             this.userListView.ContextMenuStrip = this.contextMenuStrip;
             this.userListView.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -86,11 +84,6 @@
             // 
             this.createdTimeHeader.Text = "创建时间";
             this.createdTimeHeader.Width = 150;
-            // 
-            // lastLoginHeader
-            // 
-            this.lastLoginHeader.Text = "最后登录";
-            this.lastLoginHeader.Width = 150;
             // 
             // statusHeader
             // 
@@ -190,7 +183,6 @@
         private System.Windows.Forms.ColumnHeader usernameHeader;
         private System.Windows.Forms.ColumnHeader permissionHeader;
         private System.Windows.Forms.ColumnHeader createdTimeHeader;
-        private System.Windows.Forms.ColumnHeader lastLoginHeader;
         private System.Windows.Forms.ColumnHeader statusHeader;
         private System.Windows.Forms.ContextMenuStrip contextMenuStrip;
         private System.Windows.Forms.ToolStripMenuItem editUserMenuItem;

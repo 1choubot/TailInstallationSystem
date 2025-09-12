@@ -198,14 +198,13 @@
             // 
             // btnEmergencyStop
             // 
-            this.btnEmergencyStop.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(51)))), ((int)(((byte)(217)))), ((int)(((byte)(67)))));
             this.btnEmergencyStop.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
-            this.btnEmergencyStop.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(236)))), ((int)(((byte)(23)))), ((int)(((byte)(23)))));
             this.btnEmergencyStop.Location = new System.Drawing.Point(800, 20);
             this.btnEmergencyStop.Name = "btnEmergencyStop";
             this.btnEmergencyStop.Size = new System.Drawing.Size(120, 45);
             this.btnEmergencyStop.TabIndex = 3;
             this.btnEmergencyStop.Text = "紧急停止";
+            this.btnEmergencyStop.Type = AntdUI.TTypeMini.Error;
             // 
             // btnSettings
             // 

@@ -9,12 +9,18 @@ namespace TailInstallationSystem
         private static readonly string LogDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
         private static readonly object LogLock = new object();
 
+        // 当前日志级别配置
+        private static LogLevel _currentLogLevel = LogLevel.Info; // 默认级别
+
+        // 日志级别优先级映射
+        private static readonly int[] LogLevelPriority = { 3, 2, 1, 0 }; // Info=3, Warning=2, Error=1, Debug=0
+
         public enum LogLevel
         {
-            Info,
-            Warning,
-            Error,
-            Debug
+            Debug = 0,    // Debug 级别最低
+            Error = 1,    // Error 级别最高
+            Warning = 2,  // Warning 级别中等
+            Info = 3      // Info 级别普通
         }
 
         static LogManager()
@@ -24,6 +30,47 @@ namespace TailInstallationSystem
             {
                 Directory.CreateDirectory(LogDirectory);
             }
+        }
+
+        // 设置日志级别
+        public static void SetLogLevel(string levelName)
+        {
+            try
+            {
+                if (Enum.TryParse<LogLevel>(levelName, true, out var level))
+                {
+                    _currentLogLevel = level;
+                    WriteLog(LogLevel.Info, $"日志级别已设置为: {levelName}");
+                }
+                else
+                {
+                    WriteLog(LogLevel.Warning, $"无效的日志级别: {levelName}，保持当前级别: {_currentLogLevel}");
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteLog(LogLevel.Error, $"设置日志级别失败: {ex.Message}");
+            }
+        }
+
+        // 设置日志级别（枚举版本）
+        public static void SetLogLevel(LogLevel level)
+        {
+            _currentLogLevel = level;
+            WriteLog(LogLevel.Info, $"日志级别已设置为: {level}");
+        }
+
+        // 获取当前日志级别
+        public static LogLevel GetCurrentLogLevel()
+        {
+            return _currentLogLevel;
+        }
+
+        // ：检查是否应该记录某个级别的日志
+        private static bool ShouldLog(LogLevel level)
+        {
+            // 只记录级别 >= 当前设置级别的日志
+            return (int)level <= (int)_currentLogLevel;
         }
 
         public static void LogInfo(string message)
@@ -46,10 +93,17 @@ namespace TailInstallationSystem
             WriteLog(LogLevel.Debug, message);
         }
 
+        // 支持日志级别过滤的写入方法
         private static void WriteLog(LogLevel level, string message)
         {
             try
             {
+                // 检查是否应该记录此级别的日志
+                if (!ShouldLog(level))
+                {
+                    return; // 跳过低级别日志
+                }
+
                 var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
                 var logMessage = $"[{timestamp}] [{level}] {message}";
 
@@ -123,6 +177,41 @@ namespace TailInstallationSystem
             catch (Exception ex)
             {
                 LogError($"清理过期日志失败: {ex.Message}");
+            }
+        }
+
+        // 获取日志统计信息
+        public static string GetLogStats()
+        {
+            try
+            {
+                var logFileName = $"TailInstallation_{DateTime.Now:yyyyMMdd}.log";
+                var logFilePath = Path.Combine(LogDirectory, logFileName);
+
+                if (!File.Exists(logFilePath))
+                {
+                    return "今日暂无日志";
+                }
+
+                var lines = File.ReadAllLines(logFilePath);
+                var errorCount = 0;
+                var warningCount = 0;
+                var infoCount = 0;
+                var debugCount = 0;
+
+                foreach (var line in lines)
+                {
+                    if (line.Contains("[Error]")) errorCount++;
+                    else if (line.Contains("[Warning]")) warningCount++;
+                    else if (line.Contains("[Info]")) infoCount++;
+                    else if (line.Contains("[Debug]")) debugCount++;
+                }
+
+                return $"今日日志统计 - 错误: {errorCount}, 警告: {warningCount}, 信息: {infoCount}, 调试: {debugCount}";
+            }
+            catch (Exception ex)
+            {
+                return $"获取日志统计失败: {ex.Message}";
             }
         }
     }

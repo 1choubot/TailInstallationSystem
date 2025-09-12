@@ -29,6 +29,15 @@
         private void InitializeComponent()
         {
             this.panel1 = new AntdUI.Panel();
+            this.divider3 = new AntdUI.Divider();
+            this.panel3 = new AntdUI.Panel();
+            this.btnClose = new AntdUI.Button();
+            this.btnCancel = new AntdUI.Button();
+            this.btnComplete = new AntdUI.Button();
+            this.btnStartInstall = new AntdUI.Button();
+            this.label = new AntdUI.Label();
+            this.txtOperator = new AntdUI.Input();
+            this.divider2 = new AntdUI.Divider();
             this.panel2 = new AntdUI.Panel();
             this.checkbox6 = new AntdUI.Checkbox();
             this.checkbox4 = new AntdUI.Checkbox();
@@ -57,19 +66,10 @@
             this.label1 = new AntdUI.Label();
             this.txtBarcode = new AntdUI.Input();
             this.divider1 = new AntdUI.Divider();
-            this.divider2 = new AntdUI.Divider();
-            this.panel3 = new AntdUI.Panel();
-            this.btnClose = new AntdUI.Button();
-            this.btnCancel = new AntdUI.Button();
-            this.btnComplete = new AntdUI.Button();
-            this.btnStartInstall = new AntdUI.Button();
-            this.label = new AntdUI.Label();
-            this.txtOperator = new AntdUI.Input();
-            this.divider3 = new AntdUI.Divider();
             this.panel1.SuspendLayout();
+            this.panel3.SuspendLayout();
             this.panel2.SuspendLayout();
             this.panelProductInfo.SuspendLayout();
-            this.panel3.SuspendLayout();
             this.SuspendLayout();
             // 
             // panel1
@@ -89,6 +89,83 @@
             this.panel1.Size = new System.Drawing.Size(900, 771);
             this.panel1.TabIndex = 0;
             this.panel1.Text = "panel1";
+            // 
+            // divider3
+            // 
+            this.divider3.Location = new System.Drawing.Point(3, 604);
+            this.divider3.Name = "divider3";
+            this.divider3.Size = new System.Drawing.Size(897, 23);
+            this.divider3.TabIndex = 8;
+            this.divider3.Text = "divider3";
+            // 
+            // panel3
+            // 
+            this.panel3.Controls.Add(this.btnClose);
+            this.panel3.Controls.Add(this.btnCancel);
+            this.panel3.Controls.Add(this.btnComplete);
+            this.panel3.Controls.Add(this.btnStartInstall);
+            this.panel3.Controls.Add(this.label);
+            this.panel3.Controls.Add(this.txtOperator);
+            this.panel3.Location = new System.Drawing.Point(22, 645);
+            this.panel3.Name = "panel3";
+            this.panel3.Size = new System.Drawing.Size(861, 123);
+            this.panel3.TabIndex = 7;
+            this.panel3.Text = "panel3";
+            // 
+            // btnClose
+            // 
+            this.btnClose.Location = new System.Drawing.Point(562, 62);
+            this.btnClose.Name = "btnClose";
+            this.btnClose.Size = new System.Drawing.Size(75, 53);
+            this.btnClose.TabIndex = 6;
+            this.btnClose.Text = "关闭";
+            // 
+            // btnCancel
+            // 
+            this.btnCancel.Location = new System.Drawing.Point(415, 62);
+            this.btnCancel.Name = "btnCancel";
+            this.btnCancel.Size = new System.Drawing.Size(75, 53);
+            this.btnCancel.TabIndex = 7;
+            this.btnCancel.Text = "取消操作";
+            // 
+            // btnComplete
+            // 
+            this.btnComplete.Location = new System.Drawing.Point(254, 62);
+            this.btnComplete.Name = "btnComplete";
+            this.btnComplete.Size = new System.Drawing.Size(75, 53);
+            this.btnComplete.TabIndex = 8;
+            this.btnComplete.Text = "完成确认";
+            // 
+            // btnStartInstall
+            // 
+            this.btnStartInstall.Location = new System.Drawing.Point(92, 62);
+            this.btnStartInstall.Name = "btnStartInstall";
+            this.btnStartInstall.Size = new System.Drawing.Size(75, 53);
+            this.btnStartInstall.TabIndex = 9;
+            this.btnStartInstall.Text = "开始安装";
+            // 
+            // label
+            // 
+            this.label.Location = new System.Drawing.Point(32, 20);
+            this.label.Name = "label";
+            this.label.Size = new System.Drawing.Size(75, 23);
+            this.label.TabIndex = 5;
+            this.label.Text = "操作员";
+            // 
+            // txtOperator
+            // 
+            this.txtOperator.Location = new System.Drawing.Point(132, 3);
+            this.txtOperator.Name = "txtOperator";
+            this.txtOperator.Size = new System.Drawing.Size(281, 53);
+            this.txtOperator.TabIndex = 4;
+            // 
+            // divider2
+            // 
+            this.divider2.Location = new System.Drawing.Point(3, 332);
+            this.divider2.Name = "divider2";
+            this.divider2.Size = new System.Drawing.Size(897, 23);
+            this.divider2.TabIndex = 6;
+            this.divider2.Text = "divider2";
             // 
             // panel2
             // 
@@ -340,88 +417,11 @@
             this.divider1.TabIndex = 0;
             this.divider1.Text = "divider1";
             // 
-            // divider2
-            // 
-            this.divider2.Location = new System.Drawing.Point(3, 332);
-            this.divider2.Name = "divider2";
-            this.divider2.Size = new System.Drawing.Size(897, 23);
-            this.divider2.TabIndex = 6;
-            this.divider2.Text = "divider2";
-            // 
-            // panel3
-            // 
-            this.panel3.Controls.Add(this.btnClose);
-            this.panel3.Controls.Add(this.btnCancel);
-            this.panel3.Controls.Add(this.btnComplete);
-            this.panel3.Controls.Add(this.btnStartInstall);
-            this.panel3.Controls.Add(this.label);
-            this.panel3.Controls.Add(this.txtOperator);
-            this.panel3.Location = new System.Drawing.Point(22, 645);
-            this.panel3.Name = "panel3";
-            this.panel3.Size = new System.Drawing.Size(861, 123);
-            this.panel3.TabIndex = 7;
-            this.panel3.Text = "panel3";
-            // 
-            // btnClose
-            // 
-            this.btnClose.Location = new System.Drawing.Point(562, 62);
-            this.btnClose.Name = "btnClose";
-            this.btnClose.Size = new System.Drawing.Size(75, 53);
-            this.btnClose.TabIndex = 6;
-            this.btnClose.Text = "关闭";
-            // 
-            // btnCancel
-            // 
-            this.btnCancel.Location = new System.Drawing.Point(415, 62);
-            this.btnCancel.Name = "btnCancel";
-            this.btnCancel.Size = new System.Drawing.Size(75, 53);
-            this.btnCancel.TabIndex = 7;
-            this.btnCancel.Text = "取消操作";
-            // 
-            // btnComplete
-            // 
-            this.btnComplete.Location = new System.Drawing.Point(254, 62);
-            this.btnComplete.Name = "btnComplete";
-            this.btnComplete.Size = new System.Drawing.Size(75, 53);
-            this.btnComplete.TabIndex = 8;
-            this.btnComplete.Text = "完成确认";
-            // 
-            // btnStartInstall
-            // 
-            this.btnStartInstall.Location = new System.Drawing.Point(92, 62);
-            this.btnStartInstall.Name = "btnStartInstall";
-            this.btnStartInstall.Size = new System.Drawing.Size(75, 53);
-            this.btnStartInstall.TabIndex = 9;
-            this.btnStartInstall.Text = "开始安装";
-            // 
-            // label
-            // 
-            this.label.Location = new System.Drawing.Point(32, 20);
-            this.label.Name = "label";
-            this.label.Size = new System.Drawing.Size(75, 23);
-            this.label.TabIndex = 5;
-            this.label.Text = "操作员";
-            // 
-            // txtOperator
-            // 
-            this.txtOperator.Location = new System.Drawing.Point(132, 3);
-            this.txtOperator.Name = "txtOperator";
-            this.txtOperator.Size = new System.Drawing.Size(281, 53);
-            this.txtOperator.TabIndex = 4;
-            // 
-            // divider3
-            // 
-            this.divider3.Location = new System.Drawing.Point(3, 604);
-            this.divider3.Name = "divider3";
-            this.divider3.Size = new System.Drawing.Size(897, 23);
-            this.divider3.TabIndex = 8;
-            this.divider3.Text = "divider3";
-            // 
             // TailInstallationForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(924, 795);
+            this.ClientSize = new System.Drawing.Size(1339, 795);
             this.Controls.Add(this.panel1);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -430,9 +430,9 @@
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text = "安装尾椎操作";
             this.panel1.ResumeLayout(false);
+            this.panel3.ResumeLayout(false);
             this.panel2.ResumeLayout(false);
             this.panelProductInfo.ResumeLayout(false);
-            this.panel3.ResumeLayout(false);
             this.ResumeLayout(false);
 
         }

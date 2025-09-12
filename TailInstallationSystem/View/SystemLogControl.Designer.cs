@@ -21,8 +21,8 @@
             this.exportButton = new AntdUI.Button();
             this.clearButton = new AntdUI.Button();
             this.refreshButton = new AntdUI.Button();
-            this.logDisplayTextBox = new System.Windows.Forms.RichTextBox();
             this.statusLabel = new System.Windows.Forms.Label();
+            this.logDisplayTextBox = new System.Windows.Forms.RichTextBox();
             this.toolbarPanel.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -100,6 +100,18 @@
             this.refreshButton.Type = AntdUI.TTypeMini.Primary;
             this.refreshButton.Click += new System.EventHandler(this.refreshButton_Click);
             // 
+            // statusLabel
+            // 
+            this.statusLabel.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this.statusLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.statusLabel.ForeColor = System.Drawing.Color.Gray;
+            this.statusLabel.Location = new System.Drawing.Point(27, 743);
+            this.statusLabel.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.statusLabel.Name = "statusLabel";
+            this.statusLabel.Size = new System.Drawing.Size(1253, 25);
+            this.statusLabel.TabIndex = 5;
+            this.statusLabel.Text = "就绪";
+            // 
             // logDisplayTextBox
             // 
             this.logDisplayTextBox.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(250)))), ((int)(((byte)(250)))));
@@ -110,35 +122,23 @@
             this.logDisplayTextBox.Margin = new System.Windows.Forms.Padding(4);
             this.logDisplayTextBox.Name = "logDisplayTextBox";
             this.logDisplayTextBox.ReadOnly = true;
-            this.logDisplayTextBox.Size = new System.Drawing.Size(1253, 638);
-            this.logDisplayTextBox.TabIndex = 2;
+            this.logDisplayTextBox.Size = new System.Drawing.Size(1253, 606);
+            this.logDisplayTextBox.TabIndex = 6;
             this.logDisplayTextBox.Text = "";
-            // 
-            // statusLabel
-            // 
-            this.statusLabel.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.statusLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.statusLabel.ForeColor = System.Drawing.Color.Gray;
-            this.statusLabel.Location = new System.Drawing.Point(27, 750);
-            this.statusLabel.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
-            this.statusLabel.Name = "statusLabel";
-            this.statusLabel.Size = new System.Drawing.Size(1253, 25);
-            this.statusLabel.TabIndex = 3;
-            this.statusLabel.Text = "就绪";
             // 
             // SystemLogControl
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.White;
-            this.Controls.Add(this.statusLabel);
             this.Controls.Add(this.logDisplayTextBox);
+            this.Controls.Add(this.statusLabel);
             this.Controls.Add(this.toolbarPanel);
             this.Controls.Add(this.titleLabel);
             this.Margin = new System.Windows.Forms.Padding(4);
             this.Name = "SystemLogControl";
             this.Padding = new System.Windows.Forms.Padding(27, 25, 27, 25);
-            this.Size = new System.Drawing.Size(1307, 800);
+            this.Size = new System.Drawing.Size(1307, 793);
             this.toolbarPanel.ResumeLayout(false);
             this.toolbarPanel.PerformLayout();
             this.ResumeLayout(false);
@@ -153,7 +153,7 @@
         private AntdUI.Button clearButton;
         private AntdUI.Button exportButton;
         private System.Windows.Forms.CheckBox autoRefreshCheckBox;
-        private System.Windows.Forms.RichTextBox logDisplayTextBox;
         private System.Windows.Forms.Label statusLabel;
+        private System.Windows.Forms.RichTextBox logDisplayTextBox;
     }
 }
