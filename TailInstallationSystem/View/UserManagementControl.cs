@@ -78,7 +78,6 @@ namespace TailInstallationSystem
                 }
 
                 LogManager.LogInfo($"加载了 {users.Count} 个用户");
-                // ShowMessage($"加载了 {users.Count} 个用户", NotificationType.Info); // 删除或注释此行
             }
             catch (Exception ex)
             {

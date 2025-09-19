@@ -1,4 +1,4 @@
-﻿namespace TailInstallationSystem
+﻿namespace TailInstallationSystem.View
 {
     partial class SystemLogControl
     {

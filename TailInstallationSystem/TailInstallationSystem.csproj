@@ -121,6 +121,8 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Services\CommunicationManager.cs" />
     <Compile Include="Utils\ConfigManager.cs" />
+    <Compile Include="Utils\ConfigValidator.cs" />
+    <Compile Include="Utils\TailInstallationSystem.cs" />
     <Compile Include="View\CommunicationSettingsControl.cs">
       <SubType>UserControl</SubType>
     </Compile>

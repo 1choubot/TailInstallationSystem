@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using TailInstallationSystem.Utils;
@@ -10,8 +11,12 @@ namespace TailInstallationSystem.View
     {
         private CommunicationManager commManager;
         private TailInstallationController controller;
-        private Timer statusCheckTimer;
+        private System.Windows.Forms.Timer statusCheckTimer;
+        private CancellationTokenSource cancellationTokenSource;
 
+        // 状态锁，保证线程安全
+        private readonly object disposeLock = new object();
+        private volatile bool isDisposed = false;
         // Device status tracking
         private enum DeviceStatus
         {
@@ -26,6 +31,7 @@ namespace TailInstallationSystem.View
             InitializeComponent();
             this.controller = controller;
             this.commManager = commManager;
+            this.cancellationTokenSource = new CancellationTokenSource();
 
             LogManager.OnLogWritten += OnLogMessage;
 
@@ -35,7 +41,6 @@ namespace TailInstallationSystem.View
             btnEmergencyStop.Click += btnEmergencyStop_Click;
             btnClearLog.Click += btnClearLog_Click;
 
-            // Subscribe to communication events
             if (commManager != null)
             {
                 commManager.OnDeviceConnectionChanged += OnDeviceConnectionChanged;
@@ -44,23 +49,18 @@ namespace TailInstallationSystem.View
                 commManager.OnScrewDataReceived += OnScrewDataReceived;
             }
 
-            // Subscribe to controller business events
             if (controller != null)
             {
                 controller.OnProcessStatusChanged += OnProcessStatusChanged;
                 controller.OnCurrentProductChanged += OnCurrentProductChanged;
             }
 
-            // Initialize status check timer
             InitializeStatusTimer();
 
-            // Initialize all devices to disconnected state and set default messages
             InitializeDefaultState();
         }
 
-        /// <summary>
-        /// Initialize the default UI state
-        /// </summary>
+        
         private void InitializeDefaultState()
         {
             UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
@@ -68,7 +68,6 @@ namespace TailInstallationSystem.View
             UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
             UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
 
-            // Set default product information
             currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
             currentStatusLabel.Text = "状态: 系统未启动";
         }
@@ -97,7 +96,7 @@ namespace TailInstallationSystem.View
         {
             try
             {
-                // statusLabel.Text = "正在启动系统..."; // 如有状态栏控件
+                // statusLabel.Text = "正在启动系统..."; 
                 UpdateProgress(10);
                 await controller.StartSystem();
                 // statusLabel.Text = "系统运行中";
@@ -168,7 +167,7 @@ namespace TailInstallationSystem.View
 
             if (result == DialogResult.Yes)
             {
-                // ✅ 立即停止定时器！
+                // 立即停止定时器！
                 StopStatusMonitoring();
 
                 controller?.EmergencyStop();
@@ -232,9 +231,7 @@ namespace TailInstallationSystem.View
             pcStatusLabel.ForeColor = pcColor;
         }
 
-        /// <summary>
-        /// Update individual device status with specific state
-        /// </summary>
+        
         private void UpdateDeviceStatus(string deviceName, DeviceStatus status)
         {
             if (InvokeRequired)
@@ -313,9 +310,7 @@ namespace TailInstallationSystem.View
 
         #region Communication Event Handlers
 
-        /// <summary>
-        /// Handle device connection status changes
-        /// </summary>
+        
         private void OnDeviceConnectionChanged(string deviceName, bool isConnected)
         {
             var status = isConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected;
@@ -325,87 +320,38 @@ namespace TailInstallationSystem.View
             LogManager.LogInfo($"设备状态变化: {deviceName} {statusText}");
         }
 
-        /// <summary>
-        /// Handle PC data received
-        /// </summary>
+
         private void OnDataReceived(string data)
         {
-            UpdateDeviceStatus("PC", DeviceStatus.Working);
-            LogManager.LogInfo("PC接收到工序数据");
-
-            _ = Task.Run(async () =>
+            if (CheckDisposed()) return;
+            try
             {
-                try
+                SafeInvoke(() => UpdateDeviceStatus("PC", DeviceStatus.Working));
+                LogManager.LogInfo("PC接收到工序数据");
+                // 安全的异步状态重置
+                _ = SafeDelayedAction(2000, () =>
                 {
-                    await Task.Delay(2000);
-
-                    if (!IsDisposed && IsHandleCreated)
-                    {
-                        BeginInvoke(new Action(() =>
-                        {
-                            try
-                            {
-                                UpdateDeviceStatus("PC", DeviceStatus.Waiting);
-                            }
-                            catch (Exception ex)
-                            {
-                                LogManager.LogError($"PC状态更新异常: {ex.Message}");
-                            }
-                        }));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogManager.LogError($"PC状态重置任务异常: {ex.Message}");
-                }
-            });
+                    SafeInvoke(() => UpdateDeviceStatus("PC", DeviceStatus.Waiting));
+                });
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"PC数据接收事件处理异常: {ex.Message}");
+            }
         }
 
 
-        /// <summary>
-        /// Handle barcode scanned
-        /// </summary>
+
         private void OnBarcodeScanned(string barcode)
         {
+            if (CheckDisposed()) return;
             try
             {
-                // 确保在UI线程中执行UI更新
-                if (InvokeRequired)
-                {
-                    BeginInvoke(new Action<string>(OnBarcodeScanned), barcode);
-                    return;
-                }
-
-                // 立即更新为工作状态
-                UpdateDeviceStatus("Scanner", DeviceStatus.Working);
+                SafeInvoke(() => UpdateDeviceStatus("Scanner", DeviceStatus.Working));
                 LogManager.LogInfo($"扫码枪扫描到条码: {barcode}");
-
-                _ = Task.Run(async () =>
+                _ = SafeDelayedAction(1000, () =>
                 {
-                    try
-                    {
-                        await Task.Delay(1000);
-
-                        // 回到UI线程更新状态
-                        if (!IsDisposed && IsHandleCreated)
-                        {
-                            BeginInvoke(new Action(() =>
-                            {
-                                try
-                                {
-                                    UpdateDeviceStatus("Scanner", DeviceStatus.Connected);
-                                }
-                                catch (Exception ex)
-                                {
-                                    LogManager.LogError($"扫码枪状态重置异常: {ex.Message}");
-                                }
-                            }));
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        LogManager.LogError($"扫码枪状态重置任务异常: {ex.Message}");
-                    }
+                    SafeInvoke(() => UpdateDeviceStatus("Scanner", DeviceStatus.Connected));
                 });
             }
             catch (Exception ex)
@@ -414,51 +360,91 @@ namespace TailInstallationSystem.View
             }
         }
 
-
-        /// <summary>
-        /// Handle screw driver data received
-        /// </summary>
         private void OnScrewDataReceived(string screwData)
         {
-            UpdateDeviceStatus("ScrewDriver", DeviceStatus.Working);
-            LogManager.LogInfo("螺丝机执行安装操作");
-
-            _ = Task.Run(async () =>
+            if (CheckDisposed()) return;
+            try
             {
-                try
+                SafeInvoke(() => UpdateDeviceStatus("ScrewDriver", DeviceStatus.Working));
+                LogManager.LogInfo("螺丝机执行安装操作");
+                _ = SafeDelayedAction(3000, () =>
                 {
-                    await Task.Delay(3000);
-
-                    if (!IsDisposed && IsHandleCreated)
+                    SafeInvoke(() => UpdateDeviceStatus("ScrewDriver", DeviceStatus.Connected));
+                });
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"螺丝机事件处理异常: {ex.Message}");
+            }
+        }
+        private void SafeInvoke(Action action)
+        {
+            if (CheckDisposed()) return;
+            try
+            {
+                if (InvokeRequired)
+                {
+                    if (!CheckDisposed())
                     {
                         BeginInvoke(new Action(() =>
                         {
-                            try
+                            if (!CheckDisposed())
                             {
-                                UpdateDeviceStatus("ScrewDriver", DeviceStatus.Connected);
-                            }
-                            catch (Exception ex)
-                            {
-                                LogManager.LogError($"ScrewDriver状态更新异常: {ex.Message}");
+                                action?.Invoke();
                             }
                         }));
                     }
                 }
-                catch (Exception ex)
+                else
                 {
-                    LogManager.LogError($"ScrewDriver状态重置任务异常: {ex.Message}");
+                    action?.Invoke();
                 }
-            });
+            }
+            catch (ObjectDisposedException)
+            {
+                // 控件已释放，忽略
+            }
+            catch (InvalidOperationException)
+            {
+                // 控件句柄无效，忽略
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"UI调用异常: {ex.Message}");
+            }
         }
+        private async Task SafeDelayedAction(int delayMs, Action action)
+        {
+            try
+            {
+                await Task.Delay(delayMs, cancellationTokenSource.Token);
 
+                if (!CheckDisposed())
+                {
+                    SafeInvoke(action);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 正常取消，不记录错误
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"延迟执行异常: {ex.Message}");
+            }
+        }
+        private bool CheckDisposed()
+        {
+            lock (disposeLock)
+            {
+                return isDisposed || IsDisposed || !IsHandleCreated;
+            }
+        }
 
         #endregion
 
         #region Business Process Event Handlers
 
-        /// <summary>
-        /// Handle business process status changes from controller
-        /// </summary>
         private void OnProcessStatusChanged(string barcode, string status)
         {
             if (InvokeRequired)
@@ -471,9 +457,6 @@ namespace TailInstallationSystem.View
             LogManager.LogInfo($"业务流程状态: {status}");
         }
 
-        /// <summary>
-        /// Handle current product changes from controller
-        /// </summary>
         private void OnCurrentProductChanged(string barcode, string status)
         {
             if (InvokeRequired)
@@ -493,19 +476,14 @@ namespace TailInstallationSystem.View
 
         #region Status Monitoring Timer
 
-        /// <summary>
-        /// Initialize the status checking timer
-        /// </summary>
+        
         private void InitializeStatusTimer()
         {
-            statusCheckTimer = new Timer();
+            statusCheckTimer = new System.Windows.Forms.Timer();
             statusCheckTimer.Interval = 5000; // Check every 5 seconds
             statusCheckTimer.Tick += OnStatusTimerTick;
         }
 
-        /// <summary>
-        /// Timer tick event for periodic status checking
-        /// </summary>
         private void OnStatusTimerTick(object sender, EventArgs e)
         {
             if (commManager == null || !btnStop.Enabled || statusCheckTimer?.Enabled != true)
@@ -525,19 +503,12 @@ namespace TailInstallationSystem.View
             }
         }
 
-
-        /// <summary>
-        /// Start the status monitoring timer
-        /// </summary>
         private void StartStatusMonitoring()
         {
             statusCheckTimer?.Start();
             LogManager.LogInfo("设备状态监控已启动");
         }
 
-        /// <summary>
-        /// Stop the status monitoring timer  
-        /// </summary>
         private void StopStatusMonitoring()
         {
             statusCheckTimer?.Stop();
@@ -557,9 +528,7 @@ namespace TailInstallationSystem.View
             currentStatusLabel.Text = $"状态: {status}";
         }
 
-        /// <summary>
-        /// Public method for external device status updates (called by MainWindow)
-        /// </summary>
+
         public void UpdateExternalDeviceStatus(string deviceName, bool isConnected)
         {
             var status = isConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected;
@@ -568,31 +537,40 @@ namespace TailInstallationSystem.View
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
+            lock (disposeLock)
             {
-                LogManager.OnLogWritten -= OnLogMessage;
-
-                // Unsubscribe from communication events
-                if (commManager != null)
+                if (!isDisposed && disposing)
                 {
-                    commManager.OnDeviceConnectionChanged -= OnDeviceConnectionChanged;
-                    commManager.OnDataReceived -= OnDataReceived;
-                    commManager.OnBarcodeScanned -= OnBarcodeScanned;
-                    commManager.OnScrewDataReceived -= OnScrewDataReceived;
-                }
+                    isDisposed = true;
 
-                // Unsubscribe from controller business events
-                if (controller != null)
-                {
-                    controller.OnProcessStatusChanged -= OnProcessStatusChanged;
-                    controller.OnCurrentProductChanged -= OnCurrentProductChanged;
-                }
+                    // 取消所有异步任务
+                    cancellationTokenSource?.Cancel();
 
-                // Stop and dispose timer
-                statusCheckTimer?.Stop();
-                statusCheckTimer?.Dispose();
+                    // 取消订阅事件
+                    LogManager.OnLogWritten -= OnLogMessage;
+                    if (commManager != null)
+                    {
+                        commManager.OnDeviceConnectionChanged -= OnDeviceConnectionChanged;
+                        commManager.OnDataReceived -= OnDataReceived;
+                        commManager.OnBarcodeScanned -= OnBarcodeScanned;
+                        commManager.OnScrewDataReceived -= OnScrewDataReceived;
+                    }
+                    if (controller != null)
+                    {
+                        controller.OnProcessStatusChanged -= OnProcessStatusChanged;
+                        controller.OnCurrentProductChanged -= OnCurrentProductChanged;
+                    }
+
+                    statusCheckTimer?.Stop();
+                    statusCheckTimer?.Dispose();
+
+                    // 释放取消令牌
+                    cancellationTokenSource?.Dispose();
+                }
             }
+
             base.Dispose(disposing);
         }
+
     }
 }

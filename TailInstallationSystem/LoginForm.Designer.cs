@@ -124,7 +124,7 @@
             this.ClientSize = new System.Drawing.Size(1126, 704);
             this.Controls.Add(this.panel1);
             this.Name = "LoginForm";
-            this.Text = "LoginForm";
+            this.Text = "登录界面";
             this.panel1.ResumeLayout(false);
             this.ResumeLayout(false);
 

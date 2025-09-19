@@ -132,9 +132,9 @@ namespace TailInstallationSystem
         {
             if (button == null) return;
 
+            button.Enabled = !loading;
             button.Loading = loading;
             button.Text = text;
-            button.Enabled = !loading;
         }
 
         /// <summary>
@@ -213,10 +213,19 @@ namespace TailInstallationSystem
 
                 SetButtonLoadingState(exportButton, true, "导出中...");
 
-                await ExportData();
+                bool exportResult = await ExportData();
 
-                LogManager.LogInfo("导出生产数据成功");
-                ShowMessage("数据导出成功！", MessageType.Success);
+                if (exportResult)
+                {
+                    LogManager.LogInfo("导出生产数据成功");
+                    ShowMessage("数据导出成功！", MessageType.Success);
+                }
+                else
+                {
+                    LogManager.LogInfo("用户取消导出操作");
+                    // 用户取消，不显示任何消息，或显示取消消息
+                    ShowMessage("导出已取消", MessageType.Info);
+                }
             }
             catch (Exception ex)
             {
@@ -225,9 +234,10 @@ namespace TailInstallationSystem
             }
             finally
             {
-                SetButtonLoadingState(exportButton, false, "📤 导出");
+                SetButtonLoadingState(exportButton, false, "导出");
             }
         }
+
 
         private void searchTextBox_TextChanged(object sender, EventArgs e)
         {
@@ -278,10 +288,11 @@ namespace TailInstallationSystem
 
         #region 数据操作方法
 
-        private async Task ExportData()
+        private async Task<bool> ExportData()
         {
-            await Task.Run(() =>
+            return await Task.Run(() =>
             {
+                bool result = false;
                 try
                 {
                     this.Invoke(new Action(() =>
@@ -307,16 +318,20 @@ namespace TailInstallationSystem
                                     ExportToCSV(saveFileDialog.FileName);
                                     break;
                             }
+                            result = true; 
                         }
+                        // 如果用户点击取消，result保持为false
                     }));
                 }
                 catch (Exception ex)
                 {
                     LogManager.LogError($"导出操作失败: {ex.Message}");
-                    throw;
+                    throw; // 重新抛出异常
                 }
+                return result;
             });
         }
+
 
         private void ExportToCSV(string fileName)
         {

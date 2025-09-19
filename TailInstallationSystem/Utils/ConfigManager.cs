@@ -30,34 +30,56 @@ namespace TailInstallationSystem.Utils
                 {
                     var json = File.ReadAllText(ConfigFile);
                     var config = JsonConvert.DeserializeObject<CommunicationConfig>(json);
-
                     if (config != null)
                     {
-                        // 自动处理配置文件升级
                         EnsureSystemSettingsExists(config);
+
+                        // 验证配置
+                        var validation = ConfigValidator.ValidateConfig(config);
+                        if (!validation.IsValid)
+                        {
+                            LogManager.LogError("配置文件验证失败:");
+                            foreach (var error in validation.Errors)
+                            {
+                                LogManager.LogError($"  - {error}");
+                            }
+
+                            // 显示验证错误但不阻止程序启动
+                            MessageBox.Show(
+                                $"配置文件存在错误:\n\n{validation.GetSummary()}\n" +
+                                "程序将使用默认值继续运行，请检查配置！",
+                                "配置验证警告",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Warning);
+                        }
+                        else if (validation.Warnings.Count > 0)
+                        {
+                            foreach (var warning in validation.Warnings)
+                            {
+                                LogManager.LogWarning($"配置警告: {warning}");
+                            }
+                        }
                         _currentConfig = config;
                         LogManager.LogInfo("配置文件加载成功");
                     }
                     else
                     {
+                        LogManager.LogWarning("配置文件内容为空，创建默认配置");
                         _currentConfig = CreateDefaultConfig();
                         SaveConfig(_currentConfig);
-                        LogManager.LogInfo("配置文件内容为空，已创建默认配置");
                     }
                 }
                 else
                 {
+                    LogManager.LogInfo("配置文件不存在，创建默认配置");
                     _currentConfig = CreateDefaultConfig();
                     SaveConfig(_currentConfig);
-                    LogManager.LogInfo("创建默认配置文件");
                 }
             }
             catch (Exception ex)
             {
                 LogManager.LogError($"加载配置文件失败: {ex.Message}");
                 _currentConfig = CreateDefaultConfig();
-
-                // 尝试保存默认配置
                 try
                 {
                     SaveConfig(_currentConfig);
@@ -67,22 +89,33 @@ namespace TailInstallationSystem.Utils
                     LogManager.LogError("无法保存默认配置，程序将使用内存中的默认值");
                 }
             }
-
             return _currentConfig;
         }
-
         public static void SaveConfig(CommunicationConfig config)
         {
             try
             {
                 EnsureSystemSettingsExists(config);
-
+                // 保存前验证配置
+                var validation = ConfigValidator.ValidateConfig(config);
+                if (!validation.IsValid)
+                {
+                    var errorMessage = $"配置验证失败，无法保存:\n\n{validation.GetSummary()}";
+                    LogManager.LogError("配置保存失败: " + errorMessage);
+                    throw new InvalidOperationException(errorMessage);
+                }
+                if (validation.Warnings.Count > 0)
+                {
+                    LogManager.LogWarning("配置保存时发现警告:");
+                    foreach (var warning in validation.Warnings)
+                    {
+                        LogManager.LogWarning($"  - {warning}");
+                    }
+                }
                 var json = JsonConvert.SerializeObject(config, Formatting.Indented);
                 File.WriteAllText(ConfigFile, json);
                 _currentConfig = config;
-
                 LogManager.LogInfo("配置文件保存成功");
-
                 try
                 {
                     OnConfigChanged?.Invoke(config);
@@ -97,6 +130,12 @@ namespace TailInstallationSystem.Utils
                 LogManager.LogError($"保存配置文件失败: {ex.Message}");
                 throw;
             }
+        }
+        // 新增：验证当前配置的公共方法
+        public static ValidationResult ValidateCurrentConfig()
+        {
+            var config = GetCurrentConfig();
+            return ConfigValidator.ValidateConfig(config);
         }
 
         public static CommunicationConfig GetCurrentConfig()

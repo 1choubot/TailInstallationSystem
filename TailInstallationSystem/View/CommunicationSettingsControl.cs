@@ -18,6 +18,12 @@ namespace TailInstallationSystem
         {
             InitializeComponent();
             this.AutoScroll = true;
+            // 事件绑定
+            plcTestButton.Click += plcTestButton_Click;
+            scannerTestButton.Click += scannerTestButton_Click;
+            screwTestButton.Click += screwTestButton_Click;
+            pcTestButton.Click += pcTestButton_Click;
+            saveButton.Click += saveButton_Click;
             LoadSettings();
         }
 

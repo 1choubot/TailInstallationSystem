@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace TailInstallationSystem
+namespace TailInstallationSystem.View
 {
     public partial class SystemLogControl : UserControl
     {
@@ -338,7 +338,6 @@ namespace TailInstallationSystem
 
         #endregion
 
-        // 移除重复的 Dispose 方法，改为 DisposeResources
         private void DisposeResources()
         {
             // 取消订阅事件

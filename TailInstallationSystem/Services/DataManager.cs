@@ -10,20 +10,23 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using TailInstallationSystem.Models;
+using TailInstallationSystem.Utils;
 
 namespace TailInstallationSystem
 {
     public class DataManager : IDisposable
     {
-        private readonly NodeInstrumentMESEntities context;
+        private readonly CommunicationConfig _config;
         private readonly HttpClient httpClient;
         private System.Threading.Timer retryTimer;
         private System.Threading.Timer cleanupTimer;
         private const int MAX_RETRY_COUNT = 5;
+        private bool _disposed = false;
 
-        public DataManager()
+        public DataManager(CommunicationConfig config = null)
         {
-            context = new NodeInstrumentMESEntities();
+            _config = config ?? ConfigManager.LoadConfig();
             httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
 
@@ -36,24 +39,53 @@ namespace TailInstallationSystem
         }
 
         /// <summary>
+        /// 安全的数据库操作封装
+        /// </summary>
+        private async Task<T> ExecuteWithContext<T>(Func<NodeInstrumentMESEntities, Task<T>> operation, T defaultValue = default(T))
+        {
+            if (_disposed)
+            {
+                LogManager.LogWarning("DataManager已释放，跳过数据库操作");
+                return defaultValue;
+            }
+
+            try
+            {
+                using (var context = new NodeInstrumentMESEntities())
+                {
+                    context.Database.CommandTimeout = 30;
+                    return await operation(context);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"数据库操作异常: {ex.Message}");
+                return defaultValue;
+            }
+        }
+
+        /// <summary>
         /// 保存产品数据 - 统一使用当前工序条码
         /// </summary>
         public async Task<bool> SaveProductData(string currentBarcode, string[] processDataArray,
             string tailProcessData, string completeData)
         {
-            try
+            if (string.IsNullOrWhiteSpace(currentBarcode))
+            {
+                LogManager.LogError("产品条码不能为空");
+                return false;
+            }
+
+            return await ExecuteWithContext(async context =>
             {
                 LogManager.LogInfo($"开始保存当前工序数据: {currentBarcode}");
 
-                // 检查是否已存在相同条码的记录
                 var existingProduct = await context.ProductData
                     .FirstOrDefaultAsync(p => p.Barcode == currentBarcode);
 
                 if (existingProduct != null)
                 {
                     LogManager.LogInfo($"更新现有产品记录: {currentBarcode}");
-
-                    // 更新现有记录
                     existingProduct.Process1_Data = processDataArray.Length > 0 ? processDataArray[0] : existingProduct.Process1_Data;
                     existingProduct.Process2_Data = processDataArray.Length > 1 ? processDataArray[1] : existingProduct.Process2_Data;
                     existingProduct.Process3_Data = processDataArray.Length > 2 ? processDataArray[2] : existingProduct.Process3_Data;
@@ -61,18 +93,15 @@ namespace TailInstallationSystem
                     existingProduct.CompleteData = completeData;
                     existingProduct.CompletedTime = DateTime.Now;
                     existingProduct.IsCompleted = true;
-                    existingProduct.IsUploaded = false; // 重置上传状态，等待重新上传
-
+                    existingProduct.IsUploaded = false;
                     context.Entry(existingProduct).State = EntityState.Modified;
                 }
                 else
                 {
                     LogManager.LogInfo($"创建新的产品记录: {currentBarcode}");
-
-                    // 创建新记录
                     var product = new ProductData
                     {
-                        Barcode = currentBarcode,  // 使用当前工序条码作为唯一标识
+                        Barcode = currentBarcode,
                         Process1_Data = processDataArray.Length > 0 ? processDataArray[0] : null,
                         Process2_Data = processDataArray.Length > 1 ? processDataArray[1] : null,
                         Process3_Data = processDataArray.Length > 2 ? processDataArray[2] : null,
@@ -83,22 +112,13 @@ namespace TailInstallationSystem
                         IsCompleted = true,
                         IsUploaded = false
                     };
-
                     context.ProductData.Add(product);
                 }
 
                 await context.SaveChangesAsync();
-
                 LogManager.LogInfo($"当前工序数据保存成功: {currentBarcode}");
                 return true;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"当前工序数据保存失败: {currentBarcode}");
-                LogManager.LogError($"异常消息: {ex.Message}");
-                LogManager.LogError($"内部异常: {ex.InnerException?.Message}");
-                return false;
-            }
+            }, false);
         }
 
         /// <summary>
@@ -164,12 +184,9 @@ namespace TailInstallationSystem
                 LogManager.LogInfo($"尝试通过WebSocket上传数据: {barcode}");
 
                 webSocket = new ClientWebSocket();
-
-                // 配置WebSocket选项
                 webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
 
-                // 连接到WebSocket服务器
-                var serverUri = new Uri("ws://124.222.6.60:8800");
+                var serverUri = new Uri(_config.Server.WebSocketUrl);
                 var connectToken = new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token;
 
                 LogManager.LogInfo($"正在连接WebSocket服务器: {serverUri}");
@@ -177,7 +194,6 @@ namespace TailInstallationSystem
 
                 LogManager.LogInfo($"WebSocket连接已建立");
 
-                // 发送JSON数据
                 byte[] dataBytes = Encoding.UTF8.GetBytes(jsonData);
                 var sendToken = new CancellationTokenSource(TimeSpan.FromSeconds(15)).Token;
 
@@ -189,7 +205,6 @@ namespace TailInstallationSystem
 
                 LogManager.LogInfo($"数据已发送至服务器，数据大小: {dataBytes.Length} 字节");
 
-                // 等待服务器响应
                 var responseBuffer = new byte[1024];
                 var receiveToken = new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token;
 
@@ -202,7 +217,6 @@ namespace TailInstallationSystem
                     string serverResponse = Encoding.UTF8.GetString(responseBuffer, 0, result.Count);
                     LogManager.LogInfo($"服务器响应: {serverResponse}");
 
-                    // 根据服务器响应判断成功与否
                     if (serverResponse.Contains("success") || serverResponse.Contains("ok") ||
                         serverResponse.Contains("received"))
                     {
@@ -218,7 +232,7 @@ namespace TailInstallationSystem
                 else
                 {
                     LogManager.LogInfo($"数据发送成功（无文本响应）: {barcode}");
-                    return true; // 如果服务器不返回文本响应，可以认为发送成功
+                    return true;
                 }
             }
             catch (WebSocketException wsEx)
@@ -245,7 +259,6 @@ namespace TailInstallationSystem
             }
             finally
             {
-                // 清理资源
                 try
                 {
                     if (webSocket?.State == WebSocketState.Open)
@@ -273,30 +286,23 @@ namespace TailInstallationSystem
         /// </summary>
         private async Task AddToUploadQueue(string barcode, string jsonData)
         {
-            try
+            await ExecuteWithContext(async context =>
             {
                 LogManager.LogInfo($"开始保存到上传队列: {barcode}");
 
-                // 检查是否已存在记录
                 var existingRecord = await context.UploadQueue
                     .FirstOrDefaultAsync(q => q.Barcode == barcode);
 
                 if (existingRecord != null)
                 {
                     LogManager.LogInfo($"更新现有队列记录: {barcode}");
-
-                    // 更新现有记录
                     existingRecord.JsonData = jsonData;
                     existingRecord.LastRetryTime = DateTime.Now;
-                    // 不重置 RetryCount，保持累计重试次数
-
                     context.Entry(existingRecord).State = EntityState.Modified;
                 }
                 else
                 {
                     LogManager.LogInfo($"创建新的队列记录: {barcode}");
-
-                    // 创建新记录
                     var queueItem = new UploadQueue
                     {
                         Barcode = barcode,
@@ -308,59 +314,10 @@ namespace TailInstallationSystem
                     context.UploadQueue.Add(queueItem);
                 }
 
-                // 强制保存
                 int savedCount = await context.SaveChangesAsync();
                 LogManager.LogInfo($"队列保存成功，影响行数: {savedCount}，条码: {barcode}");
-            }
-            catch (System.Data.Entity.Validation.DbEntityValidationException dbEx)
-            {
-                LogManager.LogError($"数据库验证错误: {barcode}");
-                foreach (var validationErrors in dbEx.EntityValidationErrors)
-                {
-                    LogManager.LogError($"实体: {validationErrors.Entry.Entity.GetType().Name}");
-                    foreach (var validationError in validationErrors.ValidationErrors)
-                    {
-                        LogManager.LogError($"属性: {validationError.PropertyName}");
-                        LogManager.LogError($"错误: {validationError.ErrorMessage}");
-                    }
-                }
-                throw;
-            }
-            catch (System.Data.Entity.Infrastructure.DbUpdateException dbUpdateEx)
-            {
-                LogManager.LogError($"数据库更新错误: {barcode}");
-                LogManager.LogError($"异常: {dbUpdateEx.Message}");
-
-                Exception currentEx = dbUpdateEx.InnerException;
-                int level = 1;
-                while (currentEx != null)
-                {
-                    LogManager.LogError($"内部异常[{level}]: {currentEx.GetType().Name}");
-                    LogManager.LogError($"消息: {currentEx.Message}");
-                    currentEx = currentEx.InnerException;
-                    level++;
-                }
-                throw;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"保存到上传队列失败: {barcode}");
-                LogManager.LogError($"异常类型: {ex.GetType().Name}");
-                LogManager.LogError($"异常消息: {ex.Message}");
-
-                Exception currentEx = ex.InnerException;
-                int level = 1;
-                while (currentEx != null)
-                {
-                    LogManager.LogError($"内部异常[{level}]: {currentEx.GetType().Name}");
-                    LogManager.LogError($"消息: {currentEx.Message}");
-                    currentEx = currentEx.InnerException;
-                    level++;
-                }
-
-                LogManager.LogError($"堆栈跟踪: {ex.StackTrace}");
-                throw;
-            }
+                return true;
+            }, false);
         }
 
         /// <summary>
@@ -368,7 +325,7 @@ namespace TailInstallationSystem
         /// </summary>
         private async Task RemoveFromUploadQueue(string barcode)
         {
-            try
+            await ExecuteWithContext(async context =>
             {
                 var record = await context.UploadQueue
                     .FirstOrDefaultAsync(q => q.Barcode == barcode);
@@ -379,11 +336,8 @@ namespace TailInstallationSystem
                     await context.SaveChangesAsync();
                     LogManager.LogInfo($"已从上传队列移除: {barcode}");
                 }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"从队列移除记录失败: {ex.Message}");
-            }
+                return true;
+            }, false);
         }
 
         /// <summary>
@@ -391,7 +345,7 @@ namespace TailInstallationSystem
         /// </summary>
         private async Task UpdateUploadStatus(string barcode, bool isUploaded)
         {
-            try
+            await ExecuteWithContext(async context =>
             {
                 var product = await context.ProductData
                     .FirstOrDefaultAsync(p => p.Barcode == barcode);
@@ -400,17 +354,12 @@ namespace TailInstallationSystem
                 {
                     product.IsUploaded = isUploaded;
                     product.UploadedTime = DateTime.Now;
-
                     context.Entry(product).State = EntityState.Modified;
                     await context.SaveChangesAsync();
-
                     LogManager.LogInfo($"更新上传状态成功: {barcode} -> {isUploaded}");
                 }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"更新上传状态失败: {ex.Message}");
-            }
+                return true;
+            }, false);
         }
 
         /// <summary>
@@ -424,7 +373,6 @@ namespace TailInstallationSystem
                 {
                     string backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Backup");
 
-                    // 确保备份目录存在
                     if (!Directory.Exists(backupDir))
                     {
                         Directory.CreateDirectory(backupDir);
@@ -443,8 +391,6 @@ namespace TailInstallationSystem
                     };
 
                     string backupContent = JsonConvert.SerializeObject(backupData, Formatting.Indented);
-
-                    // 使用同步方法确保兼容性
                     File.WriteAllText(filePath, backupContent, Encoding.UTF8);
 
                     LogManager.LogInfo($"紧急备份到本地文件成功: {filePath}");
@@ -453,7 +399,6 @@ namespace TailInstallationSystem
                 {
                     LogManager.LogError($"紧急备份失败: {ex.Message}");
 
-                    // 最后的尝试：写入到临时目录
                     try
                     {
                         string tempPath = Path.GetTempPath();
@@ -480,14 +425,12 @@ namespace TailInstallationSystem
             if (string.IsNullOrEmpty(fileName))
                 return "UNKNOWN";
 
-            // 移除或替换文件名中的非法字符
             char[] invalidChars = Path.GetInvalidFileNameChars();
             foreach (char invalidChar in invalidChars)
             {
                 fileName = fileName.Replace(invalidChar, '_');
             }
 
-            // 限制文件名长度
             if (fileName.Length > 50)
             {
                 fileName = fileName.Substring(0, 50);
@@ -513,7 +456,6 @@ namespace TailInstallationSystem
                     .OrderByDescending(f => f.CreationTime)
                     .ToList();
 
-                // 保留最新的100个文件，删除其余的
                 var filesToDelete = files.Skip(100);
 
                 foreach (var file in filesToDelete)
@@ -529,7 +471,6 @@ namespace TailInstallationSystem
                     }
                 }
 
-                // 检查目录大小（如果超过100MB，删除最老的文件）
                 long totalSize = files.Sum(f => f.Length);
                 const long maxSize = 100 * 1024 * 1024; // 100MB
 
@@ -538,7 +479,7 @@ namespace TailInstallationSystem
                     LogManager.LogInfo($"备份目录大小超限({totalSize / 1024 / 1024}MB)，开始清理...");
 
                     var filesToDeleteBySize = files.OrderBy(f => f.CreationTime)
-                        .TakeWhile(f => totalSize > maxSize / 2) // 清理到50MB以下
+                        .TakeWhile(f => totalSize > maxSize / 2)
                         .ToList();
 
                     foreach (var file in filesToDeleteBySize)
@@ -567,12 +508,15 @@ namespace TailInstallationSystem
                 var retryInterval = TimeSpan.FromMinutes(10);
                 var cutoffTime = DateTime.Now.Subtract(retryInterval);
 
-                var pendingItems = await context.UploadQueue
-                    .Where(q => (q.RetryCount ?? 0) < MAX_RETRY_COUNT &&
-                               (q.LastRetryTime == null || q.LastRetryTime < cutoffTime))
-                    .OrderBy(q => q.CreatedTime)
-                    .Take(10)
-                    .ToListAsync();
+                var pendingItems = await ExecuteWithContext(async context =>
+                {
+                    return await context.UploadQueue
+                        .Where(q => (q.RetryCount ?? 0) < MAX_RETRY_COUNT &&
+                                   (q.LastRetryTime == null || q.LastRetryTime < cutoffTime))
+                        .OrderBy(q => q.CreatedTime)
+                        .Take(10)
+                        .ToListAsync();
+                }, new List<UploadQueue>());
 
                 if (!pendingItems.Any())
                 {
@@ -591,22 +535,20 @@ namespace TailInstallationSystem
 
                     if (success)
                     {
-                        context.UploadQueue.Remove(item);
+                        await RemoveFromUploadQueue(item.Barcode);
                         LogManager.LogInfo($"重试上传成功，已从队列移除: {item.Barcode}");
                         await UpdateProductUploadStatus(item.Barcode, true);
                     }
                     else
                     {
-                        item.RetryCount = currentRetryCount + 1;
-                        item.LastRetryTime = DateTime.Now;
+                        await UpdateRetryCount(item.Barcode, currentRetryCount + 1);
 
-                        if (item.RetryCount >= MAX_RETRY_COUNT)
+                        if (currentRetryCount + 1 >= MAX_RETRY_COUNT)
                         {
                             LogManager.LogError($"重试次数已达上限({MAX_RETRY_COUNT})，停止重试: {item.Barcode}");
                         }
                     }
 
-                    await context.SaveChangesAsync();
                     await Task.Delay(1000);
                 }
             }
@@ -614,6 +556,27 @@ namespace TailInstallationSystem
             {
                 LogManager.LogError($"处理重试队列异常: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 更新重试次数
+        /// </summary>
+        private async Task UpdateRetryCount(string barcode, int retryCount)
+        {
+            await ExecuteWithContext(async context =>
+            {
+                var record = await context.UploadQueue
+                    .FirstOrDefaultAsync(q => q.Barcode == barcode);
+
+                if (record != null)
+                {
+                    record.RetryCount = retryCount;
+                    record.LastRetryTime = DateTime.Now;
+                    context.Entry(record).State = EntityState.Modified;
+                    await context.SaveChangesAsync();
+                }
+                return true;
+            }, false);
         }
 
         /// <summary>
@@ -625,14 +588,12 @@ namespace TailInstallationSystem
             {
                 LogManager.LogInfo($"重试WebSocket上传: {item.Barcode}");
 
-                // 检查网络连接
                 if (!await CheckNetworkConnection())
                 {
                     LogManager.LogWarning("网络连接检查失败，跳过重试");
                     return false;
                 }
 
-                // 使用相同的WebSocket上传逻辑
                 return await TryUploadData(item.Barcode, item.JsonData);
             }
             catch (Exception ex)
@@ -651,19 +612,15 @@ namespace TailInstallationSystem
             {
                 LogManager.LogInfo($"检查网络连接...");
 
-                // 直接测试WebSocket服务器连接
                 using (var testSocket = new ClientWebSocket())
                 {
-                    var testUri = new Uri("ws://124.222.6.60:8800");
+                    var testUri = new Uri(_config.Server.WebSocketUrl);
                     var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token;
-
                     await testSocket.ConnectAsync(testUri, timeout);
-
                     if (testSocket.State == WebSocketState.Open)
                     {
                         await testSocket.CloseAsync(WebSocketCloseStatus.NormalClosure,
                             "Connection test", CancellationToken.None);
-
                         LogManager.LogInfo($"网络连接正常");
                         return true;
                     }
@@ -674,21 +631,21 @@ namespace TailInstallationSystem
             catch (Exception ex)
             {
                 LogManager.LogWarning($"网络连接检查失败: {ex.Message}");
-
-                // 备选方案：ping测试
                 try
                 {
+                    var uri = new Uri(_config.Server.WebSocketUrl);
+                    var hostName = uri.Host;
                     using (var ping = new System.Net.NetworkInformation.Ping())
                     {
-                        var reply = await ping.SendPingAsync("124.222.6.60", 3000);
+                        var reply = await ping.SendPingAsync(hostName, 3000);
                         bool pingSuccess = reply.Status == System.Net.NetworkInformation.IPStatus.Success;
-
                         LogManager.LogInfo($"Ping测试结果: {(pingSuccess ? "成功" : "失败")}");
                         return pingSuccess;
                     }
                 }
-                catch
+                catch (Exception pingEx)
                 {
+                    LogManager.LogError($"Ping测试失败: {pingEx.Message}");
                     return false;
                 }
             }
@@ -696,7 +653,7 @@ namespace TailInstallationSystem
 
         private async Task UpdateProductUploadStatus(string barcode, bool isUploaded)
         {
-            try
+            await ExecuteWithContext(async context =>
             {
                 var product = await context.ProductData
                     .FirstOrDefaultAsync(p => p.Barcode == barcode);
@@ -708,61 +665,47 @@ namespace TailInstallationSystem
                     {
                         product.UploadedTime = DateTime.Now;
                     }
+                    context.Entry(product).State = EntityState.Modified;
                     await context.SaveChangesAsync();
                 }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"更新产品状态失败: {ex.Message}");
-            }
+                return true;
+            }, false);
         }
 
         public async Task<(int total, int exceeded, int pending)> GetRetryQueueStats()
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 var total = await context.UploadQueue.CountAsync();
                 var exceeded = await context.UploadQueue.CountAsync(q => (q.RetryCount ?? 0) >= MAX_RETRY_COUNT);
                 var pending = total - exceeded;
                 return (total, exceeded, pending);
-            }
-            catch
-            {
-                return (0, 0, 0);
-            }
+            }, (0, 0, 0));
         }
 
         public async Task<List<ProductData>> GetUnuploadedProducts()
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 return await context.ProductData
                     .Where(p => p.IsUploaded == false || p.IsUploaded == null)
                     .OrderBy(p => p.CreatedTime)
                     .ToListAsync();
-            }
-            catch
-            {
-                return new List<ProductData>();
-            }
+            }, new List<ProductData>());
         }
 
         public async Task<ProductData> GetProductByBarcode(string barcode)
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 return await context.ProductData
                     .FirstOrDefaultAsync(p => p.Barcode == barcode);
-            }
-            catch
-            {
-                return null;
-            }
+            }, null as ProductData);
         }
 
         public async Task<bool> MarkProductAsCompleted(string barcode)
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 var product = await context.ProductData
                     .FirstOrDefaultAsync(p => p.Barcode == barcode);
@@ -771,21 +714,17 @@ namespace TailInstallationSystem
                 {
                     product.IsCompleted = true;
                     product.CompletedTime = DateTime.Now;
+                    context.Entry(product).State = EntityState.Modified;
                     await context.SaveChangesAsync();
                     return true;
                 }
                 return false;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"标记产品完成状态失败: {ex.Message}");
-                return false;
-            }
+            }, false);
         }
 
         public async Task<List<ProductData>> GetProductDataHistory(int days = 30)
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 var cutoffDate = DateTime.Now.AddDays(-days);
 
@@ -795,29 +734,19 @@ namespace TailInstallationSystem
                     .ToListAsync();
                 LogManager.LogInfo($"获取了最近 {days} 天的 {productDataList.Count} 条产品数据");
                 return productDataList;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"获取产品数据历史记录失败: {ex.Message}");
-                return new List<ProductData>();
-            }
+            }, new List<ProductData>());
         }
 
         public async Task<List<ProductData>> GetAllProductData()
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 var productDataList = await context.ProductData
                     .OrderByDescending(p => p.CreatedTime)
                     .ToListAsync();
                 LogManager.LogInfo($"获取了所有 {productDataList.Count} 条产品数据");
                 return productDataList;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"获取所有产品数据失败: {ex.Message}");
-                return new List<ProductData>();
-            }
+            }, new List<ProductData>());
         }
 
         public async Task<List<ProductData>> SearchProductData(
@@ -827,7 +756,7 @@ namespace TailInstallationSystem
             DateTime? startDate = null,
             DateTime? endDate = null)
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 var query = context.ProductData.AsQueryable();
 
@@ -858,17 +787,12 @@ namespace TailInstallationSystem
                 var result = await query.OrderByDescending(p => p.CreatedTime).ToListAsync();
                 LogManager.LogInfo($"搜索产品数据，找到 {result.Count} 条记录");
                 return result;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"搜索产品数据失败: {ex.Message}");
-                return new List<ProductData>();
-            }
+            }, new List<ProductData>());
         }
 
         public async Task<ProductDataStats> GetProductDataStats()
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 var today = DateTime.Today;
                 var thisWeek = today.AddDays(-(int)today.DayOfWeek);
@@ -884,17 +808,12 @@ namespace TailInstallationSystem
                     PendingUploadCount = await context.ProductData.CountAsync(p => p.IsUploaded != true)
                 };
                 return stats;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"获取产品数据统计失败: {ex.Message}");
-                return new ProductDataStats();
-            }
+            }, new ProductDataStats());
         }
 
         public async Task<bool> DeleteProductData(long id)
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 var product = await context.ProductData.FindAsync(id);
                 if (product != null)
@@ -907,17 +826,12 @@ namespace TailInstallationSystem
 
                 LogManager.LogWarning($"未找到要删除的产品数据: ID={id}");
                 return false;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"删除产品数据失败: {ex.Message}");
-                return false;
-            }
+            }, false);
         }
 
         public async Task<int> DeleteProductDataBatch(List<long> ids)
         {
-            try
+            return await ExecuteWithContext(async context =>
             {
                 var products = await context.ProductData
                     .Where(p => ids.Contains(p.Id))
@@ -930,20 +844,20 @@ namespace TailInstallationSystem
                     return products.Count;
                 }
                 return 0;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"批量删除产品数据失败: {ex.Message}");
-                return 0;
-            }
+            }, 0);
         }
 
         public void Dispose()
         {
+            if (_disposed) return;
+
+            _disposed = true;
+
             retryTimer?.Dispose();
             cleanupTimer?.Dispose();
             httpClient?.Dispose();
-            context?.Dispose();
+
+            LogManager.LogInfo("DataManager已释放");
         }
 
         /// <summary>

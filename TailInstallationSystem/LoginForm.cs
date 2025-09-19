@@ -12,6 +12,14 @@ namespace TailInstallationSystem
             txtPassword.UseSystemPasswordChar = true;
             btnLogin.Click += BtnLogin_Click;
             this.Load += LoginForm_Load;
+            this.Resize += LoginForm_Resize;
+        }
+
+        private void LoginForm_Resize(object sender, EventArgs e)
+        {
+            //居中显示
+            panel1.Left = (this.ClientSize.Width - panel1.Width) / 2;
+            panel1.Top = (this.ClientSize.Height - panel1.Height) / 2;
         }
 
         private void LoginForm_Load(object sender, EventArgs e)

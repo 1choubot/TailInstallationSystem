@@ -1,7 +1,9 @@
 ﻿using HslCommunication.ModBus;
+using Newtonsoft.Json;
 using System;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using TailInstallationSystem.Models;
 using TailInstallationSystem.Utils;
@@ -11,9 +13,12 @@ namespace TailInstallationSystem
     public class CommunicationManager : IDisposable
     {
         #region 私有字段
-
         private CommunicationConfig _config;
         private bool _disposed = false;
+        private readonly object _disposeLock = new object();
+
+        // 取消令牌支持
+        private CancellationTokenSource _cancellationTokenSource;
 
         // PLC 通讯 (Modbus TCP)
         private ModbusTcpNet busTcpClient = null;
@@ -24,6 +29,9 @@ namespace TailInstallationSystem
         private bool connectSuccess_PC = false;
         private TcpListener pcListener;
         private bool pcServerRunning = false;
+        private volatile int pcRetryCount = 0;
+        private volatile bool _isDisposing = false;
+        private readonly SemaphoreSlim _disposeSemaphore = new SemaphoreSlim(1, 1);
 
         // 扫码枪通讯 (TCP)
         private Socket socketCore_Scanner = null;
@@ -51,6 +59,7 @@ namespace TailInstallationSystem
         public CommunicationManager(CommunicationConfig config = null)
         {
             _config = config ?? ConfigManager.LoadConfig();
+            _cancellationTokenSource = new CancellationTokenSource();
             LogManager.LogInfo($"通讯管理器初始化 - PLC: {_config.PLC.IP}:{_config.PLC.Port}");
         }
 
@@ -59,23 +68,21 @@ namespace TailInstallationSystem
             try
             {
                 LogManager.LogInfo("开始初始化设备连接...");
-
+                // 重新创建取消令牌
+                _cancellationTokenSource?.Dispose();
+                _cancellationTokenSource = new CancellationTokenSource();
                 // 初始化PLC连接
                 bool plcResult = await InitializePLC();
                 OnDeviceConnectionChanged?.Invoke("PLC", plcResult);
-
                 // 初始化PC TCP连接
                 bool pcResult = await InitializePCConnection();
                 OnDeviceConnectionChanged?.Invoke("PC", pcResult);
-
                 // 初始化扫码枪连接
                 bool scannerResult = await InitializeScannerConnection();
                 OnDeviceConnectionChanged?.Invoke("Scanner", scannerResult);
-
                 // 初始化螺丝机连接
                 bool screwResult = await InitializeScrewDriverConnection();
                 OnDeviceConnectionChanged?.Invoke("ScrewDriver", screwResult);
-
                 LogManager.LogInfo($"设备连接初始化完成 - PLC:{plcResult}, PC:{pcResult}, 扫码枪:{scannerResult}, 螺丝机:{screwResult}");
                 return plcResult; // 至少PLC必须连接成功
             }
@@ -85,7 +92,6 @@ namespace TailInstallationSystem
                 throw new Exception($"通讯初始化失败: {ex.Message}");
             }
         }
-
         #endregion
 
         #region PLC通讯
@@ -184,7 +190,7 @@ namespace TailInstallationSystem
 
             try
             {
-                var result = await busTcpClient.WriteAsync(_config.PLC.StartSignalAddress, (short)0);
+                var result = await busTcpClient.WriteAsync(_config.PLC.ConfirmSignalAddress, (short)0);
                 if (result.IsSuccess)
                 {
                     LogManager.LogInfo("PLC信号复位成功");
@@ -213,54 +219,100 @@ namespace TailInstallationSystem
                     pcListener = new TcpListener(System.Net.IPAddress.Any, _config.PC.Port);
                     pcListener.Start();
                     pcServerRunning = true;
+                    Interlocked.Exchange(ref pcRetryCount, 0);// 重置重试计数
                     LogManager.LogInfo($"PC服务端监听启动: 端口{_config.PC.Port}");
-
-                    // 异步接收连接
                     _ = Task.Run(async () =>
                     {
-                        while (pcServerRunning)
+                        while (pcServerRunning && pcListener != null && !_cancellationTokenSource.Token.IsCancellationRequested)
                         {
-                            var client = await pcListener.AcceptTcpClientAsync();
-                            _ = Task.Run(() => HandlePCClient(client));
-                        }
-                    });
+                            try
+                            {
+                                var client = await AcceptTcpClientWithCancellation(pcListener, _cancellationTokenSource.Token);
+                                if (client != null)
+                                {
+                                    pcRetryCount = 0;
+                                    _ = Task.Run(() => HandlePCClient(client), _cancellationTokenSource.Token);
+                                }
+                               
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                                LogManager.LogInfo("PC监听器已释放，停止接受连接");
+                                break;
+                            }
+                            catch (InvalidOperationException)
+                            {
+                                LogManager.LogInfo("PC监听器已停止，退出监听循环");
+                                break;
+                            }
+                            catch (Exception ex) when (!(ex is OutOfMemoryException || ex is StackOverflowException))
+                            {
+                                LogManager.LogError($"接受PC客户端连接异常: {ex.Message}");
 
+                                Interlocked.Increment(ref pcRetryCount);
+                                if (pcRetryCount > 10) // 超过10次连续错误，停止重试
+                                {
+                                    LogManager.LogError("PC连接错误次数过多，停止监听");
+                                    break;
+                                }
+                                // 增加延迟，避免紧密循环
+                                if (pcServerRunning && !_cancellationTokenSource.Token.IsCancellationRequested)
+                                {
+                                    var delayMs = Math.Min(10000, 1000 * pcRetryCount); // 递增延迟
+                                    await Task.Delay(delayMs, _cancellationTokenSource.Token);
+                                }
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                LogManager.LogInfo("PC监听任务被取消");
+                                break;
+                            }
+                        }
+                        LogManager.LogInfo("PC服务端监听循环已退出");
+                    }, _cancellationTokenSource.Token);
                     OnDeviceConnectionChanged?.Invoke("PC", true);
                     return true;
                 }
                 else
                 {
-                    // 客户端模式（原有实现）
+                    // 客户端模式 - 添加取消令牌支持
                     if (socket_PC != null)
                     {
-                        socket_PC.Close();
+                        try { socket_PC.Close(); } catch { }
                         socket_PC = null;
                     }
-
                     socket_PC = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                     socket_PC.ReceiveTimeout = _config.PC.TimeoutSeconds * 1000;
                     socket_PC.SendTimeout = _config.PC.TimeoutSeconds * 1000;
-
-                    var connectTask = socket_PC.ConnectAsync(_config.PC.IP, _config.PC.Port);
-                    var timeoutTask = Task.Delay(_config.PC.TimeoutSeconds * 1000);
-                    var completedTask = await Task.WhenAny(connectTask, timeoutTask);
-
-                    if (completedTask == connectTask && socket_PC.Connected)
+                    // 使用取消令牌
+                    using (var timeoutCts = new CancellationTokenSource(_config.PC.TimeoutSeconds * 1000))
+                    using (var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                        timeoutCts.Token, _cancellationTokenSource.Token))
                     {
-                        connectSuccess_PC = true;
-                        LogManager.LogInfo($"PC TCP连接成功: {_config.PC.IP}:{_config.PC.Port}");
-
-                        // 启动数据接收
-                        _ = Task.Run(ReceivePCData);
-                        return true;
-                    }
-                    else
-                    {
-                        connectSuccess_PC = false;
-                        LogManager.LogWarning($"PC TCP连接超时: {_config.PC.IP}:{_config.PC.Port}");
-                        return false;
+                        var connectTask = socket_PC.ConnectAsync(_config.PC.IP, _config.PC.Port);
+                        var timeoutTask = Task.Delay(_config.PC.TimeoutSeconds * 1000, combinedCts.Token);
+                        var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+                        if (completedTask == connectTask && !connectTask.IsFaulted && socket_PC.Connected)
+                        {
+                            connectSuccess_PC = true;
+                            LogManager.LogInfo($"PC TCP连接成功: {_config.PC.IP}:{_config.PC.Port}");
+                            // 启动数据接收
+                            _ = Task.Run(() => ReceivePCData(_cancellationTokenSource.Token), _cancellationTokenSource.Token);
+                            return true;
+                        }
+                        else
+                        {
+                            connectSuccess_PC = false;
+                            LogManager.LogWarning($"PC TCP连接超时: {_config.PC.IP}:{_config.PC.Port}");
+                            return false;
+                        }
                     }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                LogManager.LogInfo("PC连接初始化被取消");
+                return false;
             }
             catch (Exception ex)
             {
@@ -269,62 +321,122 @@ namespace TailInstallationSystem
                 return false;
             }
         }
-
         private void HandlePCClient(TcpClient client)
         {
+            string clientEndpoint = "未知客户端";
             try
             {
+                clientEndpoint = client?.Client?.RemoteEndPoint?.ToString() ?? "未知客户端";
+                LogManager.LogInfo($"PC客户端已连接: {clientEndpoint}");
+
+                if (client == null)
+                {
+                    LogManager.LogWarning("接收到空的客户端连接");
+                    return;
+                }
+                using (client)
                 using (var stream = client.GetStream())
                 {
                     byte[] buffer = new byte[_config.PC.BufferSize];
+
+                    // 设置超时
+                    client.ReceiveTimeout = _config.PC.TimeoutSeconds * 1000;
+                    client.SendTimeout = _config.PC.TimeoutSeconds * 1000;
                     int bytesRead = stream.Read(buffer, 0, buffer.Length);
                     if (bytesRead > 0)
                     {
                         string json = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                        LogManager.LogInfo($"收到PC工序JSON数据: {json}");
-                        OnDataReceived?.Invoke(json); // 触发事件，业务层处理
+                        if (string.IsNullOrWhiteSpace(json))
+                        {
+                            LogManager.LogWarning($"从 {clientEndpoint} 接收到空数据");
+                            return;
+                        }
+                        try
+                        {
+                            // 验证JSON格式
+                            JsonConvert.DeserializeObject(json);
+                            LogManager.LogInfo($"收到PC工序JSON数据: {json.Substring(0, Math.Min(100, json.Length))}...");
+                            OnDataReceived?.Invoke(json);
+                        }
+                        catch (JsonException ex)
+                        {
+                            LogManager.LogError($"接收到无效的JSON数据: {ex.Message}");
+                            LogManager.LogError($"原始数据: {json.Substring(0, Math.Min(200, json.Length))}...");
+                        }
+                    }
+                    else
+                    {
+                        LogManager.LogWarning($"PC客户端 {clientEndpoint} 发送了空数据");
                     }
                 }
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"PC客户端数据处理异常: {ex.Message}");
+                LogManager.LogError($"PC客户端 {clientEndpoint} 数据处理异常: {ex.Message}");
+
+                // 对严重异常进行特殊处理
+                if (ex is OutOfMemoryException || ex is StackOverflowException)
+                {
+                    LogManager.LogError("严重系统异常，需要立即处理");
+                    throw; // 重新抛出严重异常
+                }
+            }
+            finally
+            {
+                LogManager.LogInfo($"PC客户端 {clientEndpoint} 连接已关闭");
             }
         }
 
-        private async Task ReceivePCData()
+        private async Task ReceivePCData(CancellationToken cancellationToken)
         {
             byte[] buffer = new byte[_config.PC.BufferSize];
-
-            while (connectSuccess_PC && socket_PC != null && socket_PC.Connected)
+            try
             {
-                try
+                while (connectSuccess_PC && socket_PC != null && socket_PC.Connected && !cancellationToken.IsCancellationRequested)
                 {
-                    int received = await socket_PC.ReceiveAsync(new ArraySegment<byte>(buffer), SocketFlags.None);
-                    if (received > 0)
+                    try
                     {
-                        string data = Encoding.UTF8.GetString(buffer, 0, received);
-                        LogManager.LogInfo($"收到PC数据: {data.Substring(0, Math.Min(100, data.Length))}...");
-                        OnDataReceived?.Invoke(data);
+                        int received = await socket_PC.ReceiveAsync(new ArraySegment<byte>(buffer), SocketFlags.None);
+                        if (received > 0)
+                        {
+                            string data = Encoding.UTF8.GetString(buffer, 0, received);
+                            LogManager.LogInfo($"收到PC数据: {data.Substring(0, Math.Min(100, data.Length))}...");
+                            OnDataReceived?.Invoke(data);
+                        }
+                        else
+                        {
+                            LogManager.LogInfo("PC连接已正常关闭");
+                            break;
+                        }
                     }
-                    else
+                    catch (ObjectDisposedException)
                     {
-                        // 连接已断开
+                        LogManager.LogInfo("PC Socket已被释放");
+                        break;
+                    }
+                    catch (SocketException ex)
+                    {
+                        LogManager.LogError($"PC Socket异常: {ex.Message}");
+                        break;
+                    }
+                    catch (Exception ex) when (!(ex is OutOfMemoryException || ex is StackOverflowException))
+                    {
+                        LogManager.LogError($"接收PC数据异常: {ex.Message}");
                         break;
                     }
                 }
-                catch (Exception ex)
-                {
-                    LogManager.LogError($"接收PC数据异常: {ex.Message}");
-                    break;
-                }
             }
-
-            connectSuccess_PC = false;
-            OnDeviceConnectionChanged?.Invoke("PC", false);
-            LogManager.LogWarning("PC数据接收线程已停止");
+            catch (OperationCanceledException)
+            {
+                LogManager.LogInfo("PC数据接收任务被取消");
+            }
+            finally
+            {
+                connectSuccess_PC = false;
+                OnDeviceConnectionChanged?.Invoke("PC", false);
+                LogManager.LogWarning("PC数据接收线程已停止");
+            }
         }
-
         #endregion
 
         #region 扫码枪通讯
@@ -335,33 +447,39 @@ namespace TailInstallationSystem
             {
                 if (socketCore_Scanner != null)
                 {
-                    socketCore_Scanner.Close();
+                    try { socketCore_Scanner.Close(); } catch { }
                     socketCore_Scanner = null;
                 }
-
                 socketCore_Scanner = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 socketCore_Scanner.ReceiveTimeout = _config.Scanner.TimeoutSeconds * 1000;
                 socketCore_Scanner.SendTimeout = _config.Scanner.TimeoutSeconds * 1000;
-
-                var connectTask = socketCore_Scanner.ConnectAsync(_config.Scanner.IP, _config.Scanner.Port);
-                var timeoutTask = Task.Delay(_config.Scanner.TimeoutSeconds * 1000);
-                var completedTask = await Task.WhenAny(connectTask, timeoutTask);
-
-                if (completedTask == connectTask && socketCore_Scanner.Connected)
+                using (var timeoutCts = new CancellationTokenSource(_config.Scanner.TimeoutSeconds * 1000))
+                using (var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    timeoutCts.Token, _cancellationTokenSource.Token))
                 {
-                    connectSuccess_Scanner = true;
-                    LogManager.LogInfo($"扫码枪连接成功: {_config.Scanner.IP}:{_config.Scanner.Port}");
-
-                    // 启动扫码数据接收
-                    _ = Task.Run(ReceiveScannerData);
-                    return true;
+                    var connectTask = socketCore_Scanner.ConnectAsync(_config.Scanner.IP, _config.Scanner.Port);
+                    var timeoutTask = Task.Delay(_config.Scanner.TimeoutSeconds * 1000, combinedCts.Token);
+                    var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+                    if (completedTask == connectTask && !connectTask.IsFaulted && socketCore_Scanner.Connected)
+                    {
+                        connectSuccess_Scanner = true;
+                        LogManager.LogInfo($"扫码枪连接成功: {_config.Scanner.IP}:{_config.Scanner.Port}");
+                        // 启动扫码数据接收
+                        _ = Task.Run(() => ReceiveScannerData(_cancellationTokenSource.Token), _cancellationTokenSource.Token);
+                        return true;
+                    }
+                    else
+                    {
+                        connectSuccess_Scanner = false;
+                        LogManager.LogError($"扫码枪连接超时: {_config.Scanner.IP}:{_config.Scanner.Port}");
+                        return false;
+                    }
                 }
-                else
-                {
-                    connectSuccess_Scanner = false;
-                    LogManager.LogError($"扫码枪连接超时: {_config.Scanner.IP}:{_config.Scanner.Port}");
-                    return false;
-                }
+            }
+            catch (OperationCanceledException)
+            {
+                LogManager.LogInfo("扫码枪连接初始化被取消");
+                return false;
             }
             catch (Exception ex)
             {
@@ -370,77 +488,99 @@ namespace TailInstallationSystem
                 return false;
             }
         }
-
-        private async Task ReceiveScannerData()
+        private async Task ReceiveScannerData(CancellationToken cancellationToken)
         {
-            while (connectSuccess_Scanner && socketCore_Scanner != null && socketCore_Scanner.Connected)
+            try
             {
-                try
+                while (connectSuccess_Scanner && socketCore_Scanner != null && socketCore_Scanner.Connected && !cancellationToken.IsCancellationRequested)
                 {
-                    int received = await socketCore_Scanner.ReceiveAsync(new ArraySegment<byte>(buffer_Scanner), SocketFlags.None);
-                    if (received > 0)
+                    try
                     {
-                        string barcode = Encoding.UTF8.GetString(buffer_Scanner, 0, received).Trim();
-                        if (!string.IsNullOrEmpty(barcode))
+                        int received = await socketCore_Scanner.ReceiveAsync(new ArraySegment<byte>(buffer_Scanner), SocketFlags.None);
+                        if (received > 0)
                         {
-                            LogManager.LogInfo($"扫描到条码: {barcode}");
-                            OnBarcodeScanned?.Invoke(barcode);
+                            string barcode = Encoding.UTF8.GetString(buffer_Scanner, 0, received).Trim();
+                            if (!string.IsNullOrEmpty(barcode))
+                            {
+                                LogManager.LogInfo($"扫描到条码: {barcode}");
+                                OnBarcodeScanned?.Invoke(barcode);
+                            }
+                        }
+                        else
+                        {
+                            LogManager.LogInfo("扫码枪连接已正常关闭");
+                            break;
                         }
                     }
-                    else
+                    catch (ObjectDisposedException)
                     {
+                        LogManager.LogInfo("扫码枪Socket已被释放");
+                        break;
+                    }
+                    catch (SocketException ex)
+                    {
+                        LogManager.LogError($"扫码枪Socket异常: {ex.Message}");
+                        break;
+                    }
+                    catch (Exception ex) when (!(ex is OutOfMemoryException || ex is StackOverflowException))
+                    {
+                        LogManager.LogError($"接收扫码数据异常: {ex.Message}");
                         break;
                     }
                 }
-                catch (Exception ex)
-                {
-                    LogManager.LogError($"接收扫码数据异常: {ex.Message}");
-                    break;
-                }
             }
-
-            connectSuccess_Scanner = false;
-            OnDeviceConnectionChanged?.Invoke("Scanner", false);
-            LogManager.LogWarning("扫码枪数据接收线程已停止");
+            catch (OperationCanceledException)
+            {
+                LogManager.LogInfo("扫码枪数据接收任务被取消");
+            }
+            finally
+            {
+                connectSuccess_Scanner = false;
+                OnDeviceConnectionChanged?.Invoke("Scanner", false);
+                LogManager.LogWarning("扫码枪数据接收线程已停止");
+            }
         }
-
         #endregion
-
-        #region 螺丝机通讯（仅TCP）
-
+        #region 螺丝机通讯 - 添加取消令牌
         private async Task<bool> InitializeScrewDriverConnection()
         {
             try
             {
                 if (socket_ScrewDriver != null)
                 {
-                    socket_ScrewDriver.Close();
+                    try { socket_ScrewDriver.Close(); } catch { }
                     socket_ScrewDriver = null;
                 }
-
                 socket_ScrewDriver = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 socket_ScrewDriver.ReceiveTimeout = _config.ScrewDriver.TimeoutSeconds * 1000;
                 socket_ScrewDriver.SendTimeout = _config.ScrewDriver.TimeoutSeconds * 1000;
-
-                var connectTask = socket_ScrewDriver.ConnectAsync(_config.ScrewDriver.IP, _config.ScrewDriver.Port);
-                var timeoutTask = Task.Delay(_config.ScrewDriver.TimeoutSeconds * 1000);
-                var completedTask = await Task.WhenAny(connectTask, timeoutTask);
-
-                if (completedTask == connectTask && socket_ScrewDriver.Connected)
+                using (var timeoutCts = new CancellationTokenSource(_config.ScrewDriver.TimeoutSeconds * 1000))
+                using (var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    timeoutCts.Token, _cancellationTokenSource.Token))
                 {
-                    connectSuccess_ScrewDriver = true;
-                    LogManager.LogInfo($"螺丝机TCP连接成功: {_config.ScrewDriver.IP}:{_config.ScrewDriver.Port}");
-
-                    // 启动数据接收
-                    _ = Task.Run(ReceiveScrewDriverData);
-                    return true;
+                    var connectTask = socket_ScrewDriver.ConnectAsync(_config.ScrewDriver.IP, _config.ScrewDriver.Port);
+                    var timeoutTask = Task.Delay(_config.ScrewDriver.TimeoutSeconds * 1000, combinedCts.Token);
+                    var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+                    if (completedTask == connectTask && !connectTask.IsFaulted && socket_ScrewDriver.Connected)
+                    {
+                        connectSuccess_ScrewDriver = true;
+                        LogManager.LogInfo($"螺丝机TCP连接成功: {_config.ScrewDriver.IP}:{_config.ScrewDriver.Port}");
+                        // 启动数据接收
+                        _ = Task.Run(() => ReceiveScrewDriverData(_cancellationTokenSource.Token), _cancellationTokenSource.Token);
+                        return true;
+                    }
+                    else
+                    {
+                        connectSuccess_ScrewDriver = false;
+                        LogManager.LogError($"螺丝机TCP连接超时: {_config.ScrewDriver.IP}:{_config.ScrewDriver.Port}");
+                        return false;
+                    }
                 }
-                else
-                {
-                    connectSuccess_ScrewDriver = false;
-                    LogManager.LogError($"螺丝机TCP连接超时: {_config.ScrewDriver.IP}:{_config.ScrewDriver.Port}");
-                    return false;
-                }
+            }
+            catch (OperationCanceledException)
+            {
+                LogManager.LogInfo("螺丝机连接初始化被取消");
+                return false;
             }
             catch (Exception ex)
             {
@@ -449,38 +589,57 @@ namespace TailInstallationSystem
                 return false;
             }
         }
-
-        private async Task ReceiveScrewDriverData()
+        private async Task ReceiveScrewDriverData(CancellationToken cancellationToken)
         {
             byte[] buffer = new byte[_config.ScrewDriver.BufferSize];
-
-            while (connectSuccess_ScrewDriver && socket_ScrewDriver != null && socket_ScrewDriver.Connected)
+            try
             {
-                try
+                while (connectSuccess_ScrewDriver && socket_ScrewDriver != null && socket_ScrewDriver.Connected && !cancellationToken.IsCancellationRequested)
                 {
-                    int received = await socket_ScrewDriver.ReceiveAsync(new ArraySegment<byte>(buffer), SocketFlags.None);
-                    if (received > 0)
+                    try
                     {
-                        string data = Encoding.UTF8.GetString(buffer, 0, received);
-                        LogManager.LogInfo($"收到螺丝机数据: {data}");
-                        OnScrewDataReceived?.Invoke(data);
+                        int received = await socket_ScrewDriver.ReceiveAsync(new ArraySegment<byte>(buffer), SocketFlags.None);
+                        if (received > 0)
+                        {
+                            string data = Encoding.UTF8.GetString(buffer, 0, received);
+                            LogManager.LogInfo($"收到螺丝机数据: {data}");
+                            OnScrewDataReceived?.Invoke(data);
+                        }
+                        else
+                        {
+                            LogManager.LogInfo("螺丝机连接已正常关闭");
+                            break;
+                        }
                     }
-                    else
+                    catch (ObjectDisposedException)
                     {
+                        LogManager.LogInfo("螺丝机Socket已被释放");
+                        break;
+                    }
+                    catch (SocketException ex)
+                    {
+                        LogManager.LogError($"螺丝机Socket异常: {ex.Message}");
+                        break;
+                    }
+                    catch (Exception ex) when (!(ex is OutOfMemoryException || ex is StackOverflowException))
+                    {
+                        LogManager.LogError($"接收螺丝机数据异常: {ex.Message}");
                         break;
                     }
                 }
-                catch (Exception ex)
-                {
-                    LogManager.LogError($"接收螺丝机数据异常: {ex.Message}");
-                    break;
-                }
             }
-
-            connectSuccess_ScrewDriver = false;
-            OnDeviceConnectionChanged?.Invoke("ScrewDriver", false);
-            LogManager.LogWarning("螺丝机数据接收线程已停止");
+            catch (OperationCanceledException)
+            {
+                LogManager.LogInfo("螺丝机数据接收任务被取消");
+            }
+            finally
+            {
+                connectSuccess_ScrewDriver = false;
+                OnDeviceConnectionChanged?.Invoke("ScrewDriver", false);
+                LogManager.LogWarning("螺丝机数据接收线程已停止");
+            }
         }
+        // 在螺丝机通讯区域末尾添加：
 
         public async Task<bool> SendScrewDriverCommand(string command)
         {
@@ -496,6 +655,18 @@ namespace TailInstallationSystem
                 await socket_ScrewDriver.SendAsync(new ArraySegment<byte>(data), SocketFlags.None);
                 LogManager.LogInfo($"发送螺丝机TCP命令: {command}");
                 return true;
+            }
+            catch (ObjectDisposedException)
+            {
+                LogManager.LogError("螺丝机Socket已被释放，无法发送命令");
+                return false;
+            }
+            catch (SocketException ex)
+            {
+                LogManager.LogError($"螺丝机Socket异常，发送命令失败: {ex.Message}");
+                connectSuccess_ScrewDriver = false;
+                OnDeviceConnectionChanged?.Invoke("ScrewDriver", false);
+                return false;
             }
             catch (Exception ex)
             {
@@ -601,58 +772,183 @@ namespace TailInstallationSystem
         #endregion
 
         #region IDisposable实现
-
         public void Dispose()
         {
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-
         protected virtual void Dispose(bool disposing)
         {
-            if (!_disposed)
+            if (_isDisposing || !disposing) return;
+
+            // 使用同步等待，避免async void
+            _disposeSemaphore.Wait();
+            try
             {
-                if (disposing)
+                if (_disposed) return;
+                _isDisposing = true;
+
+                LogManager.LogInfo("开始释放通讯管理器资源...");
+
+                // 1. 取消所有异步操作
+                _cancellationTokenSource?.Cancel();
+
+                // 2. 停止所有连接状态标志
+                connectSuccess_PLC = false;
+                connectSuccess_PC = false;
+                connectSuccess_Scanner = false;
+                connectSuccess_ScrewDriver = false;
+
+                // 3. 给异步任务一些时间完成（最多等待3秒）
+                try
                 {
-                    try
-                    {
-                        // 停止所有连接
-                        connectSuccess_PLC = false;
-                        connectSuccess_PC = false;
-                        connectSuccess_Scanner = false;
-                        connectSuccess_ScrewDriver = false;
+                    Thread.Sleep(3000); // 使用同步等待
+                }
+                catch { }
 
-                        // 关闭PLC连接
-                        busTcpClient?.ConnectClose();
-                        busTcpClient = null;
+                // 4. 安全关闭所有连接
+                SafeCloseAllConnections();
 
-                        // 关闭TCP连接
-                        socket_PC?.Close();
-                        socket_PC = null;
+                // 5. 释放取消令牌
+                _cancellationTokenSource?.Dispose();
+                _cancellationTokenSource = null;
 
-                        socketCore_Scanner?.Close();
-                        socketCore_Scanner = null;
+                LogManager.LogInfo("通讯管理器资源已安全释放");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"释放通讯管理器资源时发生异常: {ex.Message}");
+            }
+            finally
+            {
+                _disposed = true;
+                _disposeSemaphore.Release();
+            }
+        }
+        private void SafeCloseAllConnections()
+        {
+            // 安全关闭PLC连接
+            try
+            {
+                if (busTcpClient != null)
+                {
+                    busTcpClient.ConnectClose();
+                    busTcpClient = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"关闭PLC连接异常: {ex.Message}");
+            }
 
-                        socket_ScrewDriver?.Close();
-                        socket_ScrewDriver = null;
-
-                        // 关闭PC服务端监听
-                        if (pcListener != null)
-                        {
-                            pcServerRunning = false;
-                            pcListener.Stop();
-                            pcListener = null;
-                        }
-
-                        LogManager.LogInfo("通讯管理器资源已释放");
-                    }
-                    catch (Exception ex)
-                    {
-                        LogManager.LogError($"释放通讯管理器资源时发生异常: {ex.Message}");
-                    }
+            // 安全关闭PC连接
+            try
+            {
+                if (pcListener != null)
+                {
+                    pcServerRunning = false;
+                    pcListener.Stop();
+                    pcListener = null;
                 }
 
-                _disposed = true;
+                if (socket_PC != null)
+                {
+                    if (socket_PC.Connected)
+                    {
+                        try
+                        {
+                            socket_PC.Shutdown(SocketShutdown.Both);
+                            Thread.Sleep(100); // 给一点时间完成握手
+                        }
+                        catch { }
+                    }
+                    socket_PC.Close();
+                    socket_PC = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"关闭PC连接异常: {ex.Message}");
+            }
+
+            // 安全关闭扫码枪连接
+            try
+            {
+                if (socketCore_Scanner != null)
+                {
+                    if (socketCore_Scanner.Connected)
+                    {
+                        try
+                        {
+                            socketCore_Scanner.Shutdown(SocketShutdown.Both);
+                            Thread.Sleep(100);
+                        }
+                        catch { }
+                    }
+                    socketCore_Scanner.Close();
+                    socketCore_Scanner = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"关闭扫码枪连接异常: {ex.Message}");
+            }
+
+            // 安全关闭螺丝机连接
+            try
+            {
+                if (socket_ScrewDriver != null)
+                {
+                    if (socket_ScrewDriver.Connected)
+                    {
+                        try
+                        {
+                            socket_ScrewDriver.Shutdown(SocketShutdown.Both);
+                            Thread.Sleep(100);
+                        }
+                        catch { }
+                    }
+                    socket_ScrewDriver.Close();
+                    socket_ScrewDriver = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"关闭螺丝机连接异常: {ex.Message}");
+            }
+        }
+
+        // 在 SafeCloseAllConnections() 方法的 } 之后添加：
+        private async Task<TcpClient> AcceptTcpClientWithCancellation(TcpListener listener, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var acceptTask = listener.AcceptTcpClientAsync();
+                var tcs = new TaskCompletionSource<bool>();
+
+                using (cancellationToken.Register(() => tcs.TrySetCanceled()))
+                {
+                    var completedTask = await Task.WhenAny(acceptTask, tcs.Task);
+
+                    if (completedTask == acceptTask)
+                    {
+                        return await acceptTask;
+                    }
+                    else
+                    {
+                        // 取消令牌触发，需要停止监听器来取消AcceptTcpClientAsync
+                        listener?.Stop();
+                        throw new OperationCanceledException();
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return null;
             }
         }
 
@@ -660,7 +956,6 @@ namespace TailInstallationSystem
         {
             Dispose(false);
         }
-
         #endregion
     }
 }

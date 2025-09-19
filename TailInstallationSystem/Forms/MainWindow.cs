@@ -12,6 +12,7 @@ namespace TailInstallationSystem
         private TailInstallationController controller;
         private UserControl currentUserControl;
         private View.SystemMonitorControl systemMonitorControl;
+        private View.SystemLogControl systemLogControl; // 新增
 
         public MainWindow()
         {
@@ -149,8 +150,11 @@ namespace TailInstallationSystem
 
         private void ShowSystemLog()
         {
-            var logControl = new SystemLogControl();
-            SwitchUserControl(logControl);
+            if (systemLogControl == null)
+            {
+                systemLogControl = new View.SystemLogControl();
+            }
+            SwitchUserControl(systemLogControl);
         }
 
         private void SwitchUserControl(UserControl newControl)

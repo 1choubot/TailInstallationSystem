@@ -33,7 +33,6 @@
             this.usernameHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.permissionHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.createdTimeHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
-            this.statusHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.contextMenuStrip = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.editUserMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.deleteUserMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -52,8 +51,7 @@
             this.userListView.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] {
             this.usernameHeader,
             this.permissionHeader,
-            this.createdTimeHeader,
-            this.statusHeader});
+            this.createdTimeHeader});
             this.userListView.ContextMenuStrip = this.contextMenuStrip;
             this.userListView.Dock = System.Windows.Forms.DockStyle.Fill;
             this.userListView.Font = new System.Drawing.Font("微软雅黑", 9F);
@@ -84,11 +82,6 @@
             // 
             this.createdTimeHeader.Text = "创建时间";
             this.createdTimeHeader.Width = 150;
-            // 
-            // statusHeader
-            // 
-            this.statusHeader.Text = "状态";
-            this.statusHeader.Width = 80;
             // 
             // contextMenuStrip
             // 
@@ -183,7 +176,6 @@
         private System.Windows.Forms.ColumnHeader usernameHeader;
         private System.Windows.Forms.ColumnHeader permissionHeader;
         private System.Windows.Forms.ColumnHeader createdTimeHeader;
-        private System.Windows.Forms.ColumnHeader statusHeader;
         private System.Windows.Forms.ContextMenuStrip contextMenuStrip;
         private System.Windows.Forms.ToolStripMenuItem editUserMenuItem;
         private System.Windows.Forms.ToolStripMenuItem deleteUserMenuItem;
