@@ -41,6 +41,8 @@
             this.isUploadedColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.uploadedTimeColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.actionsColumn = new System.Windows.Forms.DataGridViewButtonColumn();
+            this.uploadStatusLabel = new AntdUI.Label();
+            this.uploadStatusComboBox = new AntdUI.Select();
             this.toolbarPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dataGridView)).BeginInit();
             this.SuspendLayout();
@@ -62,6 +64,8 @@
             this.toolbarPanel.Controls.Add(this.searchTextBox);
             this.toolbarPanel.Controls.Add(this.exportButton);
             this.toolbarPanel.Controls.Add(this.refreshButton);
+            this.toolbarPanel.Controls.Add(this.uploadStatusLabel);
+            this.toolbarPanel.Controls.Add(this.uploadStatusComboBox);
             this.toolbarPanel.Dock = System.Windows.Forms.DockStyle.Top;
             this.toolbarPanel.Location = new System.Drawing.Point(27, 75);
             this.toolbarPanel.Margin = new System.Windows.Forms.Padding(4);
@@ -126,7 +130,6 @@
             this.dataGridView.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dataGridView.Size = new System.Drawing.Size(1226, 650);
             this.dataGridView.TabIndex = 2;
-            this.dataGridView.CellClick += new System.Windows.Forms.DataGridViewCellEventHandler(this.dataGridView_CellClick);
             // 
             // barcodeColumn
             // 
@@ -192,6 +195,30 @@
             this.actionsColumn.UseColumnTextForButtonValue = true;
             this.actionsColumn.Width = 125;
             // 
+            // uploadStatusLabel
+            // 
+            this.uploadStatusLabel.Location = new System.Drawing.Point(400, 10);
+            this.uploadStatusLabel.Name = "uploadStatusLabel";
+            this.uploadStatusLabel.Size = new System.Drawing.Size(80,44);
+            this.uploadStatusLabel.TabIndex = 3;
+            this.uploadStatusLabel.Text = "上传状态:";
+            this.uploadStatusLabel.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
+            this.uploadStatusLabel.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            // 
+            // uploadStatusComboBox
+            // 
+            this.uploadStatusComboBox.Items.AddRange(new string[] {
+                "全部数据",
+                "已上传",
+                "未上传"
+            });
+            this.uploadStatusComboBox.Location = new System.Drawing.Point(490, 10);
+            this.uploadStatusComboBox.Name = "uploadStatusComboBox";
+            this.uploadStatusComboBox.Size = new System.Drawing.Size(120, 44);
+            this.uploadStatusComboBox.TabIndex = 4;
+            this.uploadStatusComboBox.SelectedIndex = 0;
+            this.uploadStatusComboBox.SelectedValueChanged += this.uploadStatusComboBox_SelectedValueChanged;
+            // 
             // DataViewControl
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
@@ -204,10 +231,10 @@
             this.Name = "DataViewControl";
             this.Padding = new System.Windows.Forms.Padding(27, 25, 27, 25);
             this.Size = new System.Drawing.Size(1280, 812);
+            this.dataGridView.CellClick += new System.Windows.Forms.DataGridViewCellEventHandler(this.dataGridView_CellClick);
             this.toolbarPanel.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.dataGridView)).EndInit();
             this.ResumeLayout(false);
-
         }
 
         #endregion
@@ -225,5 +252,7 @@
         private System.Windows.Forms.DataGridViewTextBoxColumn isUploadedColumn;
         private System.Windows.Forms.DataGridViewTextBoxColumn uploadedTimeColumn;
         private System.Windows.Forms.DataGridViewButtonColumn actionsColumn;
+        private AntdUI.Label uploadStatusLabel;
+        private AntdUI.Select uploadStatusComboBox;
     }
 }

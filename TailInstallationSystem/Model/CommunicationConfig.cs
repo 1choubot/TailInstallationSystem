@@ -72,5 +72,8 @@ namespace TailInstallationSystem.Models
         public int RetryIntervalMinutes { get; set; } = 5;
         public int MaxRetryAttempts { get; set; } = 3;
         public string ApiKey { get; set; } = "";
+        
+        // 成功响应关键词配置
+        public string[] SuccessKeywords { get; set; } = new[] { "success", "ok", "received", "完成", "成功" };
     }
 }

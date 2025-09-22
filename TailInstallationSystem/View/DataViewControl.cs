@@ -13,7 +13,7 @@ namespace TailInstallationSystem
 {
     public partial class DataViewControl : UserControl
     {
-        private DataManager dataManager;
+        private DataService dataService;
         private List<ProductDataViewModel> allData;
         private BindingList<ProductDataViewModel> displayData;
 
@@ -29,7 +29,7 @@ namespace TailInstallationSystem
         {
             try
             {
-                dataManager = new DataManager();
+                dataService = new DataService();
                 allData = new List<ProductDataViewModel>();
                 displayData = new BindingList<ProductDataViewModel>();
 
@@ -75,8 +75,7 @@ namespace TailInstallationSystem
             {
                 SetButtonLoadingState(refreshButton, true, "加载中...");
 
-                var productDataList = await dataManager.GetProductDataHistory(30);
-
+                var productDataList = await dataService.GetProductDataHistory(30);
                 allData = productDataList.Select(p => new ProductDataViewModel
                 {
                     Id = p.Id,
@@ -147,7 +146,6 @@ namespace TailInstallationSystem
                 var parentForm = this.FindForm();
                 if (parentForm != null)
                 {
-                    // 使用 AntdUI.Message
                     switch (type)
                     {
                         case MessageType.Success:
@@ -223,7 +221,6 @@ namespace TailInstallationSystem
                 else
                 {
                     LogManager.LogInfo("用户取消导出操作");
-                    // 用户取消，不显示任何消息，或显示取消消息
                     ShowMessage("导出已取消", MessageType.Info);
                 }
             }
@@ -238,33 +235,47 @@ namespace TailInstallationSystem
             }
         }
 
+        // 筛选事件处理方法
+        private void uploadStatusComboBox_SelectedValueChanged(object sender, AntdUI.ObjectNEventArgs e)
+        {
+            ApplyCurrentFilter();
+        }
 
-        private void searchTextBox_TextChanged(object sender, EventArgs e)
+        private void ApplyCurrentFilter()
         {
             try
             {
-                var searchText = searchTextBox.Text?.Trim().ToLower();
-
-                if (string.IsNullOrEmpty(searchText))
-                {
-                    RefreshDisplayData(allData);
-                    return;
-                }
+                var searchText = searchTextBox.Text?.Trim().ToLower() ?? "";
+                var selectedUploadStatus = uploadStatusComboBox.SelectedValue?.ToString() ?? "全部数据";
 
                 var filteredData = allData.Where(item =>
-                    (item.Barcode?.ToLower().Contains(searchText) ?? false) ||
-                    (item.Status?.ToLower().Contains(searchText) ?? false) ||
-                    (item.IsUploaded?.ToLower().Contains(searchText) ?? false)
-                ).ToList();
+                {
+                    // 文本搜索筛选
+                    bool matchesSearch = string.IsNullOrEmpty(searchText) ||
+                        (item.Barcode?.ToLower().Contains(searchText) ?? false) ||
+                        (item.Status?.ToLower().Contains(searchText) ?? false);
+
+                    // 上传状态筛选
+                    bool matchesUploadStatus = selectedUploadStatus == "全部数据" ||
+                        (selectedUploadStatus == "已上传" && item.IsUploaded == "已上传") ||
+                        (selectedUploadStatus == "未上传" && item.IsUploaded == "未上传");
+
+                    return matchesSearch && matchesUploadStatus;
+                }).ToList();
 
                 RefreshDisplayData(filteredData);
 
-                LogManager.LogInfo($"搜索: {searchText}, 找到 {filteredData.Count} 条记录");
+                LogManager.LogInfo($"筛选完成，显示 {filteredData.Count} 条记录");
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"搜索失败: {ex.Message}");
+                LogManager.LogError($"筛选失败: {ex.Message}");
             }
+        }
+
+        private void searchTextBox_TextChanged(object sender, EventArgs e)
+        {
+            ApplyCurrentFilter(); // 替换原有的筛选逻辑
         }
 
         private void dataGridView_CellClick(object sender, DataGridViewCellEventArgs e)
@@ -274,7 +285,28 @@ namespace TailInstallationSystem
                 if (e.ColumnIndex == actionsColumn.Index && e.RowIndex >= 0 && e.RowIndex < displayData.Count)
                 {
                     var selectedItem = displayData[e.RowIndex];
-                    ShowProductDetails(selectedItem);
+
+                    if (selectedItem.IsUploaded == "已上传")
+                    {
+                        // 只有查看详情功能
+                        ShowProductDetails(selectedItem);
+                    }
+                    else
+                    {
+                        // 有两个按钮，需要判断点击了哪个
+                        var clickedButton = GetClickedButtonIndex(e);
+
+                        if (clickedButton == 0)
+                        {
+                            // 点击了第一个按钮：查看详情
+                            ShowProductDetails(selectedItem);
+                        }
+                        else if (clickedButton == 1)
+                        {
+                            // 点击了第二个按钮：手动上传
+                            HandleManualUpload(selectedItem);
+                        }
+                    }
                 }
             }
             catch (Exception ex)
@@ -283,6 +315,68 @@ namespace TailInstallationSystem
                 ShowMessage("操作失败", MessageType.Error);
             }
         }
+
+        // 辅助方法
+        private int GetClickedButtonIndex(DataGridViewCellEventArgs e)
+        {
+            var cellBounds = dataGridView.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
+            var mousePos = dataGridView.PointToClient(Cursor.Position);
+
+            // 计算相对于单元格的点击位置
+            var relativeX = mousePos.X - cellBounds.Left;
+            var buttonWidth = (cellBounds.Width - 30) / 2;
+
+            if (relativeX < buttonWidth + 10)
+            {
+                return 0; // 第一个按钮
+            }
+            else
+            {
+                return 1; // 第二个按钮
+            }
+        }
+
+        // 手动上传处理方法
+        private async void HandleManualUpload(ProductDataViewModel item)
+        {
+            try
+            {
+                var result = MessageBox.Show(
+                    $"确定要手动上传产品 '{item.Barcode}' 的数据吗？",
+                    "确认上传",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (result != DialogResult.Yes)
+                    return;
+
+                ShowMessage("正在上传数据...", MessageType.Info);
+                LogManager.LogInfo($"开始手动上传数据: {item.Barcode}");
+
+                using (var tempDataManager = new DataManager())
+                {
+                    bool success = await tempDataManager.UploadToServer(item.Barcode, item.OriginalData.CompleteData);
+
+                    if (success)
+                    {
+                        ShowMessage("数据上传成功！", MessageType.Success);
+                        LogManager.LogInfo($"手动上传成功: {item.Barcode}");
+                        LoadData(); // 刷新数据显示
+                    }
+                    else
+                    {
+                        ShowMessage("数据上传失败，请检查网络连接或服务器状态", MessageType.Warning);
+                        LogManager.LogWarning($"手动上传失败: {item.Barcode}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"手动上传异常: {ex.Message}, 条码: {item.Barcode}");
+                ShowMessage($"上传异常: {ex.Message}", MessageType.Error);
+            }
+        }
+
 
         #endregion
 
@@ -318,7 +412,7 @@ namespace TailInstallationSystem
                                     ExportToCSV(saveFileDialog.FileName);
                                     break;
                             }
-                            result = true; 
+                            result = true;
                         }
                         // 如果用户点击取消，result保持为false
                     }));
@@ -396,22 +490,11 @@ namespace TailInstallationSystem
             {
                 LogManager.LogInfo($"查看产品详情: {productData.Barcode}");
 
-                var detailInfo = $@"产品条码: {productData.Barcode}
-                                    状态: {productData.Status}
-                                    创建时间: {productData.CreatedTime}
-                                    完成时间: {productData.CompletedTime}
-                                    上传状态: {productData.IsUploaded}
-                                    上传时间: {productData.UploadedTime}
-
-                                    详细数据:
-                                    工序1数据: {productData.OriginalData?.Process1_Data ?? "N/A"}
-                                    工序2数据: {productData.OriginalData?.Process2_Data ?? "N/A"}
-                                    工序3数据: {productData.OriginalData?.Process3_Data ?? "N/A"}
-                                    尾夹工序数据: {productData.OriginalData?.Process4_Data ?? "N/A"}
-                                    完成数据: {productData.OriginalData?.CompleteData ?? "N/A"}";
-
-                MessageBox.Show(detailInfo, $"产品详情 - {productData.Barcode}",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // 使用 AntdUI 的详情窗口替代 MessageBox
+                using (var detailForm = new Forms.ProductDetailForm(productData))
+                {
+                    detailForm.ShowDialog(this.FindForm());
+                }
             }
             catch (Exception ex)
             {
@@ -428,52 +511,83 @@ namespace TailInstallationSystem
             LoadData();
         }
 
-
-        // 新增自定义绘制方法，查看详情按钮
         private void DataGridView_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.ColumnIndex == actionsColumn.Index && e.RowIndex >= 0)
             {
                 e.Handled = true;
                 e.PaintBackground(e.CellBounds, true);
+                var item = displayData[e.RowIndex];
 
-                // 按钮样式参数
-                var buttonRect = new Rectangle(e.CellBounds.Left + 10, e.CellBounds.Top + 6, e.CellBounds.Width - 20, e.CellBounds.Height - 12);
-                var buttonColor = Color.FromArgb(51, 153, 255); // 主色
-                var textColor = Color.White;
-                var borderRadius = 8;
-
-                // 绘制圆角按钮
-                using (GraphicsPath path = new GraphicsPath())
+                if (item.IsUploaded == "已上传")
                 {
-                    path.AddArc(buttonRect.Left, buttonRect.Top, borderRadius, borderRadius, 180, 90);
-                    path.AddArc(buttonRect.Right - borderRadius, buttonRect.Top, borderRadius, borderRadius, 270, 90);
-                    path.AddArc(buttonRect.Right - borderRadius, buttonRect.Bottom - borderRadius, borderRadius, borderRadius, 0, 90);
-                    path.AddArc(buttonRect.Left, buttonRect.Bottom - borderRadius, borderRadius, borderRadius, 90, 90);
-                    path.CloseFigure();
-
-                    using (SolidBrush brush = new SolidBrush(buttonColor))
-                    {
-                        e.Graphics.FillPath(brush, path);
-                    }
-
-                    // 绘制边框（直接用同一个 path）
-                    using (Pen pen = new Pen(Color.FromArgb(41, 128, 185), 1))
-                    {
-                        e.Graphics.DrawPath(pen, path);
-                    }
+                    // 只显示查看详情按钮
+                    DrawSingleButton(e.Graphics, e.CellBounds, "查看详情", Color.FromArgb(51, 153, 255));
                 }
+                else
+                {
+                    // 显示两个按钮：查看详情 和 手动上传
+                    DrawDoubleButtons(e.Graphics, e.CellBounds, "查看详情", "手动上传");
+                }
+            }
+        }
+        private void DrawSingleButton(Graphics graphics, Rectangle cellBounds, string text, Color buttonColor)
+        {
+            var buttonRect = new Rectangle(
+                cellBounds.Left + 10,
+                cellBounds.Top + 6,
+                cellBounds.Width - 20,
+                cellBounds.Height - 12
+            );
 
-                // 绘制文字
-                var text = "查看详情";
-                var font = new Font("微软雅黑", 9F, FontStyle.Bold);
-                var textSize = e.Graphics.MeasureString(text, font);
+            DrawButton(graphics, buttonRect, text, buttonColor);
+        }
+        private void DrawDoubleButtons(Graphics graphics, Rectangle cellBounds, string text1, string text2)
+        {
+            int buttonWidth = (cellBounds.Width - 30) / 2;
+
+            // 第一个按钮：查看详情
+            var button1Rect = new Rectangle(
+                cellBounds.Left + 5,
+                cellBounds.Top + 6,
+                buttonWidth,
+                cellBounds.Height - 12
+            );
+            DrawButton(graphics, button1Rect, text1, Color.FromArgb(51, 153, 255));
+
+            // 第二个按钮：手动上传
+            var button2Rect = new Rectangle(
+                cellBounds.Left + buttonWidth + 15,
+                cellBounds.Top + 6,
+                buttonWidth,
+                cellBounds.Height - 12
+            );
+            DrawButton(graphics, button2Rect, text2, Color.FromArgb(34, 139, 34));
+        }
+        private void DrawButton(Graphics graphics, Rectangle buttonRect, string text, Color buttonColor)
+        {
+            var borderRadius = 6;
+
+            using (GraphicsPath path = new GraphicsPath())
+            {
+                path.AddArc(buttonRect.Left, buttonRect.Top, borderRadius, borderRadius, 180, 90);
+                path.AddArc(buttonRect.Right - borderRadius, buttonRect.Top, borderRadius, borderRadius, 270, 90);
+                path.AddArc(buttonRect.Right - borderRadius, buttonRect.Bottom - borderRadius, borderRadius, borderRadius, 0, 90);
+                path.AddArc(buttonRect.Left, buttonRect.Bottom - borderRadius, borderRadius, borderRadius, 90, 90);
+                path.CloseFigure();
+                using (SolidBrush brush = new SolidBrush(buttonColor))
+                {
+                    graphics.FillPath(brush, path);
+                }
+            }
+            // 绘制文字
+            using (Font font = new Font("微软雅黑", 8F, FontStyle.Bold))
+            using (SolidBrush textBrush = new SolidBrush(Color.White))
+            {
+                var textSize = graphics.MeasureString(text, font);
                 var textX = buttonRect.Left + (buttonRect.Width - textSize.Width) / 2;
                 var textY = buttonRect.Top + (buttonRect.Height - textSize.Height) / 2;
-                using (SolidBrush textBrush = new SolidBrush(textColor))
-                {
-                    e.Graphics.DrawString(text, font, textBrush, textX, textY);
-                }
+                graphics.DrawString(text, font, textBrush, textX, textY);
             }
         }
     }

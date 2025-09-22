@@ -275,7 +275,7 @@ namespace TailInstallationSystem
                 }
                 else
                 {
-                    // 客户端模式 - 添加取消令牌支持
+                    // 客户端模式
                     if (socket_PC != null)
                     {
                         try { socket_PC.Close(); } catch { }
@@ -639,7 +639,6 @@ namespace TailInstallationSystem
                 LogManager.LogWarning("螺丝机数据接收线程已停止");
             }
         }
-        // 在螺丝机通讯区域末尾添加：
 
         public async Task<bool> SendScrewDriverCommand(string command)
         {
@@ -802,7 +801,7 @@ namespace TailInstallationSystem
                 // 3. 给异步任务一些时间完成（最多等待3秒）
                 try
                 {
-                    Thread.Sleep(3000); // 使用同步等待
+                    Thread.Sleep(1000); // 使用同步等待
                 }
                 catch { }
 
@@ -918,7 +917,6 @@ namespace TailInstallationSystem
             }
         }
 
-        // 在 SafeCloseAllConnections() 方法的 } 之后添加：
         private async Task<TcpClient> AcceptTcpClientWithCancellation(TcpListener listener, CancellationToken cancellationToken)
         {
             try

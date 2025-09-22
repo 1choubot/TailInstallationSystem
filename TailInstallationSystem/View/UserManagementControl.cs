@@ -90,39 +90,6 @@ namespace TailInstallationSystem
             }
         }
 
-        private List<User> GetAllUsers()
-        {
-            return new List<User>
-            {
-                new User
-                {
-                    Id = 1,
-                    Username = "admin",
-                    Permission = UserPermission.Administrator,
-                    CreatedTime = DateTime.Now.AddDays(-30),
-                    LastLoginTime = DateTime.Now.AddHours(-2),
-                    IsActive = true
-                },
-                new User
-                {
-                    Id = 2,
-                    Username = "operator1",
-                    Permission = UserPermission.Operator,
-                    CreatedTime = DateTime.Now.AddDays(-15),
-                    LastLoginTime = DateTime.Now.AddDays(-1),
-                    IsActive = true
-                },
-                new User
-                {
-                    Id = 3,
-                    Username = "viewer1",
-                    Permission = UserPermission.Viewer,
-                    CreatedTime = DateTime.Now.AddDays(-7),
-                    LastLoginTime = null,
-                    IsActive = false
-                }
-            };
-        }
 
         private string GetPermissionDisplayName(UserPermission permission)
         {

@@ -17,7 +17,6 @@ namespace TailInstallationSystem.View
         // 状态锁，保证线程安全
         private readonly object disposeLock = new object();
         private volatile bool isDisposed = false;
-        // Device status tracking
         private enum DeviceStatus
         {
             Connected,      // 已连接 - 绿色
@@ -340,8 +339,6 @@ namespace TailInstallationSystem.View
             }
         }
 
-
-
         private void OnBarcodeScanned(string barcode)
         {
             if (CheckDisposed()) return;
@@ -480,7 +477,7 @@ namespace TailInstallationSystem.View
         private void InitializeStatusTimer()
         {
             statusCheckTimer = new System.Windows.Forms.Timer();
-            statusCheckTimer.Interval = 5000; // Check every 5 seconds
+            statusCheckTimer.Interval = 5000; 
             statusCheckTimer.Tick += OnStatusTimerTick;
         }
 

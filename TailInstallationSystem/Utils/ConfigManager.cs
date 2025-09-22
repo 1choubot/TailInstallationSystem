@@ -131,7 +131,7 @@ namespace TailInstallationSystem.Utils
                 throw;
             }
         }
-        // 新增：验证当前配置的公共方法
+        // 验证当前配置的公共方法
         public static ValidationResult ValidateCurrentConfig()
         {
             var config = GetCurrentConfig();

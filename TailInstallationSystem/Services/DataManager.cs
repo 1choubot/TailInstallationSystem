@@ -19,6 +19,7 @@ namespace TailInstallationSystem
     {
         private readonly CommunicationConfig _config;
         private readonly HttpClient httpClient;
+        private readonly DataService _dataService;
         private System.Threading.Timer retryTimer;
         private System.Threading.Timer cleanupTimer;
         private const int MAX_RETRY_COUNT = 5;
@@ -27,6 +28,7 @@ namespace TailInstallationSystem
         public DataManager(CommunicationConfig config = null)
         {
             _config = config ?? ConfigManager.LoadConfig();
+            _dataService = new DataService(_config);
             httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
 
@@ -217,8 +219,8 @@ namespace TailInstallationSystem
                     string serverResponse = Encoding.UTF8.GetString(responseBuffer, 0, result.Count);
                     LogManager.LogInfo($"服务器响应: {serverResponse}");
 
-                    if (serverResponse.Contains("success") || serverResponse.Contains("ok") ||
-                        serverResponse.Contains("received"))
+                    // 修改响应判断逻辑 - 针对不同测试服务器
+                    if (IsSuccessfulResponse(serverResponse, serverUri))
                     {
                         LogManager.LogInfo($"服务器确认数据接收成功: {barcode}");
                         return true;
@@ -263,11 +265,8 @@ namespace TailInstallationSystem
                 {
                     if (webSocket?.State == WebSocketState.Open)
                     {
-                        await webSocket.CloseAsync(
-                            WebSocketCloseStatus.NormalClosure,
-                            "Upload completed",
-                            CancellationToken.None);
-                        LogManager.LogInfo($"WebSocket连接已正常关闭");
+                        // 改进关闭逻辑
+                        await CloseWebSocketSafely(webSocket);
                     }
                 }
                 catch (Exception cleanEx)
@@ -277,6 +276,90 @@ namespace TailInstallationSystem
                 finally
                 {
                     webSocket?.Dispose();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 判断服务器响应是否成功
+        /// </summary>
+        private bool IsSuccessfulResponse(string response, Uri serverUri)
+        {
+            if (string.IsNullOrEmpty(response))
+            {
+                LogManager.LogWarning("服务器响应为空");
+                return false;
+            }
+
+            // 获取配置的成功关键词
+            var successKeywords = _config.Server.SuccessKeywords ?? new[] { "success", "ok", "received", "完成", "成功" };
+            
+            foreach (var keyword in successKeywords)
+            {
+                if (response.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    LogManager.LogInfo($"服务器确认成功，关键词: '{keyword}', 完整响应: {response}");
+                    return true;
+                }
+            }
+
+            LogManager.LogWarning($"生产服务器响应不匹配预期格式: {response}");
+            LogManager.LogInfo($"期望的成功关键词: {string.Join(", ", successKeywords)}");
+            
+            return false;
+        }
+
+        /// <summary>
+        /// 安全关闭WebSocket连接
+        /// </summary>
+        private async Task CloseWebSocketSafely(ClientWebSocket webSocket)
+        {
+            try
+            {
+                // 先关闭输出流
+                await webSocket.CloseOutputAsync(
+                    WebSocketCloseStatus.NormalClosure, 
+                    "Upload completed", 
+                    CancellationToken.None);
+                
+                LogManager.LogInfo("WebSocket输出流已关闭");
+
+                // 尝试接收关闭确认（超时处理）
+                var buffer = new byte[1024];
+                var timeout = new CancellationTokenSource(2000); // 2秒超时
+                
+                try
+                {
+                    while (webSocket.State == WebSocketState.CloseSent)
+                    {
+                        var result = await webSocket.ReceiveAsync(
+                            new ArraySegment<byte>(buffer), 
+                            timeout.Token);
+                        
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            LogManager.LogInfo("收到WebSocket关闭确认");
+                            break;
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    LogManager.LogWarning("等待WebSocket关闭确认超时");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogWarning($"安全关闭WebSocket过程中异常: {ex.Message}");
+                
+                // 如果正常关闭失败，强制中止连接
+                try
+                {
+                    webSocket.Abort();
+                }
+                catch (Exception abortEx)
+                {
+                    LogManager.LogError($"强制中止WebSocket连接失败: {abortEx.Message}");
                 }
             }
         }
@@ -683,26 +766,6 @@ namespace TailInstallationSystem
             }, (0, 0, 0));
         }
 
-        public async Task<List<ProductData>> GetUnuploadedProducts()
-        {
-            return await ExecuteWithContext(async context =>
-            {
-                return await context.ProductData
-                    .Where(p => p.IsUploaded == false || p.IsUploaded == null)
-                    .OrderBy(p => p.CreatedTime)
-                    .ToListAsync();
-            }, new List<ProductData>());
-        }
-
-        public async Task<ProductData> GetProductByBarcode(string barcode)
-        {
-            return await ExecuteWithContext(async context =>
-            {
-                return await context.ProductData
-                    .FirstOrDefaultAsync(p => p.Barcode == barcode);
-            }, null as ProductData);
-        }
-
         public async Task<bool> MarkProductAsCompleted(string barcode)
         {
             return await ExecuteWithContext(async context =>
@@ -722,33 +785,22 @@ namespace TailInstallationSystem
             }, false);
         }
 
+        public async Task<List<ProductData>> GetUnuploadedProducts()
+        {
+            return await _dataService.GetUnuploadedProducts();
+        }
+        public async Task<ProductData> GetProductByBarcode(string barcode)
+        {
+            return await _dataService.GetProductByBarcode(barcode);
+        }
         public async Task<List<ProductData>> GetProductDataHistory(int days = 30)
         {
-            return await ExecuteWithContext(async context =>
-            {
-                var cutoffDate = DateTime.Now.AddDays(-days);
-
-                var productDataList = await context.ProductData
-                    .Where(p => p.CreatedTime >= cutoffDate)
-                    .OrderByDescending(p => p.CreatedTime)
-                    .ToListAsync();
-                LogManager.LogInfo($"获取了最近 {days} 天的 {productDataList.Count} 条产品数据");
-                return productDataList;
-            }, new List<ProductData>());
+            return await _dataService.GetProductDataHistory(days);
         }
-
         public async Task<List<ProductData>> GetAllProductData()
         {
-            return await ExecuteWithContext(async context =>
-            {
-                var productDataList = await context.ProductData
-                    .OrderByDescending(p => p.CreatedTime)
-                    .ToListAsync();
-                LogManager.LogInfo($"获取了所有 {productDataList.Count} 条产品数据");
-                return productDataList;
-            }, new List<ProductData>());
+            return await _dataService.GetAllProductData();
         }
-
         public async Task<List<ProductData>> SearchProductData(
             string barcode = null,
             bool? isCompleted = null,
@@ -756,95 +808,19 @@ namespace TailInstallationSystem
             DateTime? startDate = null,
             DateTime? endDate = null)
         {
-            return await ExecuteWithContext(async context =>
-            {
-                var query = context.ProductData.AsQueryable();
-
-                if (!string.IsNullOrEmpty(barcode))
-                {
-                    query = query.Where(p => p.Barcode.Contains(barcode));
-                }
-
-                if (isCompleted.HasValue)
-                {
-                    query = query.Where(p => p.IsCompleted == isCompleted.Value);
-                }
-
-                if (isUploaded.HasValue)
-                {
-                    query = query.Where(p => p.IsUploaded == isUploaded.Value);
-                }
-
-                if (startDate.HasValue)
-                {
-                    query = query.Where(p => p.CreatedTime >= startDate.Value);
-                }
-                if (endDate.HasValue)
-                {
-                    query = query.Where(p => p.CreatedTime <= endDate.Value);
-                }
-
-                var result = await query.OrderByDescending(p => p.CreatedTime).ToListAsync();
-                LogManager.LogInfo($"搜索产品数据，找到 {result.Count} 条记录");
-                return result;
-            }, new List<ProductData>());
+            return await _dataService.SearchProductData(barcode, isCompleted, isUploaded, startDate, endDate);
         }
-
-        public async Task<ProductDataStats> GetProductDataStats()
+        public async Task<DataService.ProductDataStats> GetProductDataStats()
         {
-            return await ExecuteWithContext(async context =>
-            {
-                var today = DateTime.Today;
-                var thisWeek = today.AddDays(-(int)today.DayOfWeek);
-                var thisMonth = new DateTime(today.Year, today.Month, 1);
-                var stats = new ProductDataStats
-                {
-                    TotalCount = await context.ProductData.CountAsync(),
-                    CompletedCount = await context.ProductData.CountAsync(p => p.IsCompleted == true),
-                    UploadedCount = await context.ProductData.CountAsync(p => p.IsUploaded == true),
-                    TodayCount = await context.ProductData.CountAsync(p => p.CreatedTime >= today),
-                    WeekCount = await context.ProductData.CountAsync(p => p.CreatedTime >= thisWeek),
-                    MonthCount = await context.ProductData.CountAsync(p => p.CreatedTime >= thisMonth),
-                    PendingUploadCount = await context.ProductData.CountAsync(p => p.IsUploaded != true)
-                };
-                return stats;
-            }, new ProductDataStats());
+            return await _dataService.GetProductDataStats();
         }
-
         public async Task<bool> DeleteProductData(long id)
         {
-            return await ExecuteWithContext(async context =>
-            {
-                var product = await context.ProductData.FindAsync(id);
-                if (product != null)
-                {
-                    context.ProductData.Remove(product);
-                    await context.SaveChangesAsync();
-                    LogManager.LogInfo($"删除产品数据成功: ID={id}, Barcode={product.Barcode}");
-                    return true;
-                }
-
-                LogManager.LogWarning($"未找到要删除的产品数据: ID={id}");
-                return false;
-            }, false);
+            return await _dataService.DeleteProductData(id);
         }
-
         public async Task<int> DeleteProductDataBatch(List<long> ids)
         {
-            return await ExecuteWithContext(async context =>
-            {
-                var products = await context.ProductData
-                    .Where(p => ids.Contains(p.Id))
-                    .ToListAsync();
-                if (products.Any())
-                {
-                    context.ProductData.RemoveRange(products);
-                    await context.SaveChangesAsync();
-                    LogManager.LogInfo($"批量删除产品数据成功: {products.Count} 条");
-                    return products.Count;
-                }
-                return 0;
-            }, 0);
+            return await _dataService.DeleteProductDataBatch(ids);
         }
 
         public void Dispose()
@@ -856,24 +832,10 @@ namespace TailInstallationSystem
             retryTimer?.Dispose();
             cleanupTimer?.Dispose();
             httpClient?.Dispose();
-
+            _dataService?.Dispose();
             LogManager.LogInfo("DataManager已释放");
         }
 
-        /// <summary>
-        /// 产品数据统计信息
-        /// </summary>
-        public class ProductDataStats
-        {
-            public int TotalCount { get; set; }
-            public int CompletedCount { get; set; }
-            public int UploadedCount { get; set; }
-            public int TodayCount { get; set; }
-            public int WeekCount { get; set; }
-            public int MonthCount { get; set; }
-            public int PendingUploadCount { get; set; }
-            public double CompletionRate => TotalCount > 0 ? (double)CompletedCount / TotalCount * 100 : 0;
-            public double UploadRate => TotalCount > 0 ? (double)UploadedCount / TotalCount * 100 : 0;
-        }
+       
     }
 }

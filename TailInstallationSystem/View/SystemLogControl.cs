@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace TailInstallationSystem.View
@@ -10,6 +11,8 @@ namespace TailInstallationSystem.View
     public partial class SystemLogControl : UserControl
     {
         private Timer autoRefreshTimer;
+        private readonly Queue<string> logQueue = new Queue<string>();
+        private const int MAX_BUFFER_SIZE = 1000;
         private List<string> logBuffer = new List<string>();
         private int lastDisplayedLogCount = 0;
 
@@ -39,22 +42,23 @@ namespace TailInstallationSystem.View
         {
             if (InvokeRequired)
             {
-                Invoke(new Action<LogManager.LogLevel, string, string>(OnLogWritten), level, timestamp, message);
+                // 使用BeginInvoke避免阻塞调用线程
+                BeginInvoke(new Action<LogManager.LogLevel, string, string>(OnLogWritten), level, timestamp, message);
                 return;
             }
 
             var logLine = $"[{timestamp}] [{GetLevelDisplayName(level)}] {message}";
 
-            // 添加到缓冲区
-            logBuffer.Add(logLine);
-
-            // 限制缓冲区大小
-            if (logBuffer.Count > 1000)
+            // Queue自动管理大小
+            logQueue.Enqueue(logLine);
+            if (logQueue.Count > MAX_BUFFER_SIZE)
             {
-                logBuffer.RemoveAt(0);
+                logQueue.Dequeue();
             }
 
-            // 如果启用了自动刷新，立即显示新日志
+            // 同步更新List用于导出等功能
+            logBuffer = logQueue.ToList();
+
             if (autoRefreshCheckBox.Checked)
             {
                 AppendLogToDisplay(logLine, level);
@@ -63,25 +67,49 @@ namespace TailInstallationSystem.View
 
         private void AppendLogToDisplay(string logLine, LogManager.LogLevel level)
         {
-            // 设置日志颜色
-            var color = GetLogLevelColor(level);
-
-            logDisplayTextBox.SelectionStart = logDisplayTextBox.TextLength;
-            logDisplayTextBox.SelectionColor = color;
-            logDisplayTextBox.AppendText(logLine + Environment.NewLine);
-
-            // 自动滚动到底部
-            logDisplayTextBox.SelectionStart = logDisplayTextBox.TextLength;
-            logDisplayTextBox.ScrollToCaret();
-
-            // 限制显示的行数
-            if (logDisplayTextBox.Lines.Length > 1000)
+            // 暂停绘制，批量操作
+            logDisplayTextBox.SuspendLayout();
+            try
             {
-                var lines = logDisplayTextBox.Lines;
-                var newLines = new string[500];
-                Array.Copy(lines, lines.Length - 500, newLines, 0, 500);
-                logDisplayTextBox.Lines = newLines;
+                logDisplayTextBox.SelectionStart = logDisplayTextBox.TextLength;
+                logDisplayTextBox.SelectionColor = GetLogLevelColor(level);
+                logDisplayTextBox.AppendText(logLine + Environment.NewLine);
+
+                // 优化行数限制逻辑
+                var lineCount = logDisplayTextBox.Lines.Length;
+                if (lineCount > 1000)
+                {
+                    // 使用更高效的文本截取
+                    var text = logDisplayTextBox.Text;
+                    var lines = text.Split('\n');
+                    var keepLines = lines.Skip(lines.Length - 500).ToArray();
+                    logDisplayTextBox.Text = string.Join("\n", keepLines);
+                }
+
+                // 只有在用户未手动滚动时才自动滚动
+                if (!_userScrolled)
+                {
+                    logDisplayTextBox.SelectionStart = logDisplayTextBox.TextLength;
+                    logDisplayTextBox.ScrollToCaret();
+                }
             }
+            finally
+            {
+                logDisplayTextBox.ResumeLayout();
+            }
+        }
+
+        private bool _userScrolled = false;
+
+        // 检测用户滚动状态
+        private void logDisplayTextBox_Scroll(object sender, EventArgs e)
+        {
+            var rtb = sender as RichTextBox;
+            var visibleLines = rtb.Height / rtb.Font.Height;
+            var totalLines = rtb.Lines.Length;
+            var firstVisibleLine = rtb.GetLineFromCharIndex(rtb.GetCharIndexFromPosition(new Point(0, 0)));
+            
+            _userScrolled = (firstVisibleLine + visibleLines) < totalLines - 2;
         }
 
         private async void LoadRecentLogs()
@@ -91,29 +119,48 @@ namespace TailInstallationSystem.View
                 UpdateStatus("正在加载日志...");
                 SetButtonState(refreshButton, false, "加载中...");
 
-                // 清空显示区域和缓冲区
+                // 在后台线程执行文件读取
+                var logs = await Task.Run(async () => {
+                    return await LogManager.GetRecentLogs(500).ConfigureAwait(false);
+                });
+
+                // 清空UI（UI线程操作）
                 logDisplayTextBox.Clear();
+                logQueue.Clear();
                 logBuffer.Clear();
 
-                // 从日志文件加载最近500条
-                var logs = await LogManager.GetRecentLogs(500);
+                // 批量添加到显示区域
+                var batchText = new System.Text.StringBuilder();
                 foreach (var logLine in logs)
                 {
                     var level = ExtractLogLevel(logLine);
-                    AppendLogToDisplay(logLine, level);
-                    logBuffer.Add(logLine);
+                    logQueue.Enqueue(logLine);
+                    
+                    // 批量构建文本，减少RichTextBox操作次数
+                    batchText.AppendLine(logLine);
                 }
 
+                // 一次性设置文本内容
+                logDisplayTextBox.Text = batchText.ToString();
+                logBuffer = logQueue.ToList();
                 lastDisplayedLogCount = logBuffer.Count;
-                UpdateStatus($"已加载 {logs.Length} 条日志记录");
 
-                LogManager.LogInfo("日志显示已刷新");
+                // 滚动到底部显示最新日志
+                if (logDisplayTextBox.Text.Length > 0)
+                {
+                    logDisplayTextBox.SelectionStart = logDisplayTextBox.Text.Length;
+                    logDisplayTextBox.ScrollToCaret();
+                }
+
+                // 重置用户滚动状态，因为这是程序加载，不是用户操作
+                _userScrolled = false;
+
+                UpdateStatus($"已加载 {logs.Length} 条日志记录");
             }
             catch (Exception ex)
             {
                 UpdateStatus("加载日志失败");
                 ShowMessage($"加载日志失败: {ex.Message}", MessageType.Error);
-                LogManager.LogError($"加载日志失败: {ex.Message}");
             }
             finally
             {
@@ -260,7 +307,9 @@ namespace TailInstallationSystem.View
             {
                 logDisplayTextBox.Clear();
                 logBuffer.Clear();
+                logQueue.Clear(); // 同时清空队列
                 lastDisplayedLogCount = 0;
+                _userScrolled = false; // 重置滚动状态
                 UpdateStatus("日志显示已清空");
                 LogManager.LogInfo("日志显示已清空");
                 ShowMessage("日志显示已清空", MessageType.Success);
@@ -347,17 +396,43 @@ namespace TailInstallationSystem.View
             if (autoRefreshTimer != null)
             {
                 autoRefreshTimer.Stop();
+                autoRefreshTimer.Tick -= AutoRefreshTimer_Tick;
                 autoRefreshTimer.Dispose();
                 autoRefreshTimer = null;
             }
+
+            // 清理缓冲区
+            logQueue?.Clear();
+            logBuffer?.Clear();
         }
 
-        // 重写 Dispose 方法
+        private volatile bool _disposed = false;
+
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
+            if (!_disposed && disposing)
             {
-                DisposeResources();
+                _disposed = true;
+                
+                // 确保事件取消订阅
+                try
+                {
+                    LogManager.OnLogWritten -= OnLogWritten;
+                }
+                catch { /* 忽略取消订阅时的异常 */ }
+
+                // 停止定时器
+                if (autoRefreshTimer != null)
+                {
+                    autoRefreshTimer.Stop();
+                    autoRefreshTimer.Tick -= AutoRefreshTimer_Tick;
+                    autoRefreshTimer.Dispose();
+                    autoRefreshTimer = null;
+                }
+
+                // 清理缓冲区
+                logQueue?.Clear();
+                logBuffer?.Clear();
 
                 if (components != null)
                 {

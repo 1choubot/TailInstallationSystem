@@ -14,11 +14,11 @@ namespace TailInstallationSystem.Utils
         /// <summary>
         /// 保存拼接后的生产数据到本地JSON文件
         /// </summary>
-        /// <param name="barcode">工序14扫描的条码（文件名）</param>
-        /// <param name="process11Data">工序11的JSON数据</param>
-        /// <param name="process12Data">工序12的JSON数据</param>
-        /// <param name="process13Data">工序13的JSON数据</param>
-        /// <param name="process14Data">工序14的JSON数据</param>
+        /// <param name="barcode">扫描的条码（文件名）</param>
+        /// <param name="process11Data">工序1的JSON数据</param>
+        /// <param name="process12Data">工序2的JSON数据</param>
+        /// <param name="process13Data">工序3的JSON数据</param>
+        /// <param name="process14Data">工序4的JSON数据</param>
         public static async Task<bool> SaveProductionData(
             string barcode,
             string process11Data,
@@ -28,7 +28,7 @@ namespace TailInstallationSystem.Utils
         {
             try
             {
-                // 创建日期文件夹（格式：2024-01-15）
+                // 创建日期文件夹（格式：年-月-日）
                 var today = DateTime.Now.ToString("yyyy-MM-dd");
                 var dailyDirectory = Path.Combine(BaseDirectory, today);
 
@@ -38,7 +38,7 @@ namespace TailInstallationSystem.Utils
                     LogManager.LogInfo($"创建日期目录: {dailyDirectory}");
                 }
 
-                // 生成文件名（使用工序14扫描的条码）
+                // 生成文件名（使用工序4扫描的条码）
                 var fileName = $"{SanitizeFileName(barcode)}.json";
                 var filePath = Path.Combine(dailyDirectory, fileName);
 
@@ -46,10 +46,10 @@ namespace TailInstallationSystem.Utils
                 var processes = new object[4];
 
                 // 解析各工序JSON并添加到数组
-                processes[0] = TryParseJson(process11Data);  // 工序11：合装
-                processes[1] = TryParseJson(process12Data);  // 工序12：气密性测试  
-                processes[2] = TryParseJson(process13Data);  // 工序13：多功能测试
-                processes[3] = TryParseJson(process14Data);  // 工序14：安装尾椎
+                processes[0] = TryParseJson(process11Data);  // 工序1：合装
+                processes[1] = TryParseJson(process12Data);  // 工序2：气密性测试  
+                processes[2] = TryParseJson(process13Data);  // 工序3：多功能测试
+                processes[3] = TryParseJson(process14Data);  // 工序4：安装尾椎
 
                 // 序列化为JSON字符串
                 var jsonContent = JsonConvert.SerializeObject(processes, Formatting.Indented);

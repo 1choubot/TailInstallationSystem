@@ -12,7 +12,7 @@ namespace TailInstallationSystem
         private TailInstallationController controller;
         private UserControl currentUserControl;
         private View.SystemMonitorControl systemMonitorControl;
-        private View.SystemLogControl systemLogControl; // 新增
+        private View.SystemLogControl systemLogControl; 
 
         public MainWindow()
         {

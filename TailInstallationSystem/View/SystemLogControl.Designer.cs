@@ -55,12 +55,11 @@
             // 
             // autoRefreshCheckBox
             // 
-            this.autoRefreshCheckBox.AutoSize = true;
             this.autoRefreshCheckBox.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.autoRefreshCheckBox.Location = new System.Drawing.Point(387, 19);
+            this.autoRefreshCheckBox.Location = new System.Drawing.Point(388, 12);
             this.autoRefreshCheckBox.Margin = new System.Windows.Forms.Padding(4);
             this.autoRefreshCheckBox.Name = "autoRefreshCheckBox";
-            this.autoRefreshCheckBox.Size = new System.Drawing.Size(91, 24);
+            this.autoRefreshCheckBox.Size = new System.Drawing.Size(91, 44);
             this.autoRefreshCheckBox.TabIndex = 3;
             this.autoRefreshCheckBox.Text = "自动刷新";
             this.autoRefreshCheckBox.UseVisualStyleBackColor = true;
@@ -125,6 +124,7 @@
             this.logDisplayTextBox.Size = new System.Drawing.Size(1253, 606);
             this.logDisplayTextBox.TabIndex = 6;
             this.logDisplayTextBox.Text = "";
+            this.logDisplayTextBox.VScroll += new System.EventHandler(this.logDisplayTextBox_Scroll);
             // 
             // SystemLogControl
             // 
@@ -140,7 +140,6 @@
             this.Padding = new System.Windows.Forms.Padding(27, 25, 27, 25);
             this.Size = new System.Drawing.Size(1307, 793);
             this.toolbarPanel.ResumeLayout(false);
-            this.toolbarPanel.PerformLayout();
             this.ResumeLayout(false);
 
         }
