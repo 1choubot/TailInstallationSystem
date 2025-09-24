@@ -30,10 +30,16 @@ namespace TailInstallationSystem
         private string cachedBarcode = null;
         private readonly object barcodeLock = new object();
         private CancellationTokenSource cancellationTokenSource;
+
+        // 拧紧轴数据缓存
+        private TighteningAxisData latestTighteningData = null;
+        private readonly object tighteningDataLock = new object();
+
         #region Events
         public event Action<string, string> OnProcessStatusChanged;
         public event Action<string, string> OnCurrentProductChanged;
         #endregion
+
         public TailInstallationController(CommunicationManager communicationManager)
         {
             commManager = communicationManager;
@@ -44,11 +50,18 @@ namespace TailInstallationSystem
             // 绑定事件
             commManager.OnDataReceived += ProcessReceivedData;
             commManager.OnBarcodeScanned += ProcessBarcodeData;
-            commManager.OnScrewDataReceived += ProcessScrewData;
+            commManager.OnTighteningDataReceived += ProcessTighteningData; 
         }
 
         public async Task StartSystem()
         {
+            var licenseManager = new LicenseManager();
+            licenseManager.CheckActive();
+            if (!licenseManager.ShowActive())
+            {
+                throw new InvalidOperationException("软件授权验证失败，无法启动系统");
+            }
+
             lock (runningStateLock)
             {
                 if (isRunning)
@@ -79,6 +92,7 @@ namespace TailInstallationSystem
                 throw;
             }
         }
+
         public async Task StopSystem()
         {
             lock (runningStateLock)
@@ -115,6 +129,11 @@ namespace TailInstallationSystem
             lock (barcodeLock)
             {
                 cachedBarcode = null;
+            }
+
+            lock (tighteningDataLock)
+            {
+                latestTighteningData = null;
             }
 
             // 清空处理数据队列
@@ -207,6 +226,83 @@ namespace TailInstallationSystem
                 OnProcessStatusChanged?.Invoke("", $"数据处理异常: {ex.Message}");
             }
         }
+
+        private void ProcessBarcodeData(string barcode)
+        {
+            lock (barcodeLock)
+            {
+                LogManager.LogInfo($"扫描到条码: {barcode}");
+
+                // 只有在需要时才缓存
+                TaskCompletionSource<string> currentWaitTask = null;
+                lock (barcodeTaskLock)
+                {
+                    currentWaitTask = barcodeWaitTask;
+                }
+
+                if (currentWaitTask != null && !currentWaitTask.Task.IsCompleted)
+                {
+                    // 有等待任务，直接完成任务
+                    LogManager.LogInfo("条码扫描等待任务已完成");
+                    try
+                    {
+                        currentWaitTask.SetResult(barcode);
+                        lock (barcodeTaskLock)
+                        {
+                            if (barcodeWaitTask == currentWaitTask)
+                            {
+                                barcodeWaitTask = null;
+                            }
+                        }
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        LogManager.LogError($"完成等待任务异常: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    // 没有等待任务，缓存条码
+                    cachedBarcode = barcode;
+                    LogManager.LogInfo($"条码已缓存: {barcode}");
+                }
+
+                OnCurrentProductChanged?.Invoke(barcode, "已扫描条码");
+            }
+        }
+
+        // 拧紧轴数据处理方法 
+        private void ProcessTighteningData(TighteningAxisData tighteningData)
+        {
+            try
+            {
+                lock (tighteningDataLock)
+                {
+                    latestTighteningData = tighteningData;
+                }
+
+                // 记录拧紧过程日志
+                if (tighteningData.IsRunning)
+                {
+                    LogManager.LogInfo($"拧紧轴运行中 - 实时扭矩: {tighteningData.RealtimeTorque:F2}Nm, 目标: {tighteningData.TargetTorque:F2}Nm");
+                }
+                else if (tighteningData.IsOperationCompleted)
+                {
+                    LogManager.LogInfo($"拧紧操作完成 - 完成扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
+                }
+
+                // 如果有错误，记录错误日志
+                if (tighteningData.HasError)
+                {
+                    LogManager.LogError($"拧紧轴错误 - 错误代码: {tighteningData.ErrorCode}, 状态: {tighteningData.GetStatusDisplayName()}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"处理拧紧轴数据异常: {ex.Message}");
+            }
+        }
+
         private bool ValidateProcessData()
         {
             lock (processDataLock)
@@ -254,61 +350,10 @@ namespace TailInstallationSystem
                     if (!receivedProcessData.TryDequeue(out processDataArray[i]))
                     {
                         LogManager.LogWarning($"获取第{i + 1}道工序数据失败");
-                        //processDataArray[i] = null;
                     }
                 }
                 return processDataArray;
             }
-        }
-
-
-        private void ProcessBarcodeData(string barcode)
-        {
-            lock (barcodeLock)
-            {
-                LogManager.LogInfo($"扫描到条码: {barcode}");
-
-                // 只有在需要时才缓存
-                TaskCompletionSource<string> currentWaitTask = null;
-                lock (barcodeTaskLock)
-                {
-                    currentWaitTask = barcodeWaitTask;
-                }
-                if (currentWaitTask != null && !currentWaitTask.Task.IsCompleted)
-                {
-                    // 有等待任务，直接完成任务
-                    LogManager.LogInfo("条码扫描等待任务已完成");
-                    try
-                    {
-                        currentWaitTask.SetResult(barcode);
-                        lock (barcodeTaskLock)
-                        {
-                            if (barcodeWaitTask == currentWaitTask)
-                            {
-                                barcodeWaitTask = null;
-                            }
-                        }
-                    }
-                    catch (InvalidOperationException ex)
-                    {
-                        LogManager.LogError($"完成等待任务异常: {ex.Message}");
-                    }
-                }
-                else
-                {
-                    // 没有等待任务，缓存条码
-                    cachedBarcode = barcode;
-                    LogManager.LogInfo($"条码已缓存: {barcode}");
-                }
-
-                OnCurrentProductChanged?.Invoke(barcode, "已扫描条码");
-            }
-        }
-
-        private void ProcessScrewData(string screwData)
-        {
-            LogManager.LogInfo($"螺丝机数据: {screwData}");
-            // 解析螺丝机返回的扭矩等数据
         }
 
         private async Task ExecuteTailInstallation()
@@ -322,8 +367,10 @@ namespace TailInstallationSystem
                     OnProcessStatusChanged?.Invoke("", "工序数据不完整或无效");
                     return;
                 }
+
                 LogManager.LogInfo("开始执行尾椎安装工序");
                 OnProcessStatusChanged?.Invoke("", "开始执行尾椎安装");
+
                 // 1. 等待条码扫描
                 OnProcessStatusChanged?.Invoke("", "等待条码扫描");
                 string barcode = await WaitForBarcodeScan();
@@ -333,24 +380,26 @@ namespace TailInstallationSystem
                 {
                     throw new InvalidOperationException("扫描到的条码为空");
                 }
-                OnCurrentProductChanged?.Invoke(barcode, "等待螺丝安装");
-                // 2. 执行螺丝安装
-                OnProcessStatusChanged?.Invoke(barcode, "执行螺丝安装");
-                var screwResult = await PerformScrewInstallation();
-                OnCurrentProductChanged?.Invoke(barcode, "螺丝安装完成");
+                OnCurrentProductChanged?.Invoke(barcode, "条码扫描完成，等待拧紧操作");
+
+                // 2. 等待拧紧轴操作完成 
+                OnProcessStatusChanged?.Invoke(barcode, "等待拧紧轴操作完成");
+                var tighteningResult = await WaitForTighteningCompletion();
+                OnCurrentProductChanged?.Invoke(barcode, "拧紧操作完成");
+
                 // 3. 生成本工序数据
                 OnProcessStatusChanged?.Invoke(barcode, "生成工序数据");
-                var tailProcessData = GenerateTailProcessData(barcode, screwResult);
+                var tailProcessData = GenerateTailProcessData(barcode, tighteningResult);
+
                 // 4. 整合所有数据
                 OnProcessStatusChanged?.Invoke(barcode, "整合数据");
-
-                // 安全获取并验证工序数据
                 var processDataArray = SafeGetProcessData();
-
                 var completeData = CombineAllProcessData(tailProcessData, processDataArray);
+
                 // 5. 保存到本地数据库
                 OnProcessStatusChanged?.Invoke(barcode, "保存数据");
                 await dataManager.SaveProductData(barcode, processDataArray, tailProcessData, completeData);
+
                 // 6. 保存到本地JSON文件
                 OnProcessStatusChanged?.Invoke(barcode, "保存本地文件");
                 var localFileSaved = await LocalFileManager.SaveProductionData(
@@ -360,6 +409,7 @@ namespace TailInstallationSystem
                     processDataArray.Length > 2 ? processDataArray[2] : null,
                     tailProcessData
                 );
+
                 if (localFileSaved)
                 {
                     LogManager.LogInfo($"产品 {barcode} 本地文件保存成功");
@@ -368,9 +418,11 @@ namespace TailInstallationSystem
                 {
                     LogManager.LogWarning($"产品 {barcode} 本地文件保存失败");
                 }
+
                 // 7. 上传到服务器
                 OnProcessStatusChanged?.Invoke(barcode, "上传数据");
                 bool uploadSuccess = await dataManager.UploadToServer(barcode, completeData);
+
                 if (uploadSuccess)
                 {
                     LogManager.LogInfo($"产品 {barcode} 数据上传成功");
@@ -381,6 +433,7 @@ namespace TailInstallationSystem
                     LogManager.LogWarning($"产品 {barcode} 数据上传失败，已加入重试队列");
                     OnCurrentProductChanged?.Invoke(barcode, "数据上传失败");
                 }
+
                 LogManager.LogInfo("尾椎安装工序完成");
                 OnProcessStatusChanged?.Invoke(barcode, "尾椎安装完成");
             }
@@ -410,6 +463,7 @@ namespace TailInstallationSystem
                     return result;
                 }
             }
+
             LogManager.LogInfo("缓存中无条码，等待新的扫码数据...");
 
             // 创建等待任务
@@ -419,6 +473,7 @@ namespace TailInstallationSystem
                 barcodeWaitTask = new TaskCompletionSource<string>();
                 waitTask = barcodeWaitTask;
             }
+
             try
             {
                 // 设置超时（30秒）
@@ -458,28 +513,59 @@ namespace TailInstallationSystem
             }
         }
 
-        private async Task<ScrewInstallationResult> PerformScrewInstallation()
+        // 等待拧紧操作完成方法 
+        private async Task<TighteningResult> WaitForTighteningCompletion()
         {
-            LogManager.LogInfo("开始执行螺丝安装...");
+            LogManager.LogInfo("等待拧紧轴操作完成...");
 
-            // 发送螺丝机启动命令
-            await commManager.SendScrewDriverCommand("START_SCREW_INSTALLATION");
+            var config = commManager.GetCurrentConfig();
+            var maxTimeout = config.TighteningAxis.MaxOperationTimeoutSeconds;
 
-            // 等待螺丝安装完成（实际应该监听螺丝机返回的完成信号）
-            await Task.Delay(5000); // 预计安装时间
+            // 使用通信管理器的等待方法
+            var tighteningData = await commManager.WaitForTighteningCompletion(maxTimeout);
 
-            LogManager.LogInfo("螺丝安装完成");
-
-            // 实际项目中应该解析螺丝机返回的真实扭矩数据
-            return new ScrewInstallationResult
+            if (tighteningData != null)
             {
-                Torque = 2.5m, // 这里应该从螺丝机实际返回数据中解析
-                InstallTime = DateTime.Now,
-                Success = true // 这里应该根据螺丝机返回的状态判断
-            };
+                LogManager.LogInfo($"拧紧操作完成 - 扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
+
+                return new TighteningResult
+                {
+                    Torque = tighteningData.CompletedTorque,                  
+                    TargetTorque = tighteningData.TargetTorque,                
+                    LowerLimitTorque = tighteningData.LowerLimitTorque,         
+                    UpperLimitTorque = tighteningData.UpperLimitTorque,      
+                    TighteningTime = tighteningData.Timestamp,
+                    Success = tighteningData.IsQualified,
+                    QualityResult = tighteningData.QualityResult,
+                    ErrorCode = tighteningData.ErrorCode,
+                    StatusCode = tighteningData.RunningStatusCode,
+                    QualifiedCount = tighteningData.QualifiedCount,
+                    TorqueAchievementRate = tighteningData.TorqueAchievementRate
+                };
+            }
+            else
+            {
+                LogManager.LogError("等待拧紧操作完成超时或失败");
+
+                // 尝试获取最后的拧紧数据
+                var lastData = await commManager.ReadTighteningAxisData();
+
+                return new TighteningResult
+                {
+                    Torque = lastData?.CompletedTorque ?? 0f,                  
+                    TargetTorque = lastData?.TargetTorque ?? 0f,              
+                    LowerLimitTorque = lastData?.LowerLimitTorque ?? 0f,      
+                    UpperLimitTorque = lastData?.UpperLimitTorque ?? 0f,      
+                    TighteningTime = DateTime.Now,
+                    Success = false,
+                    QualityResult = "操作超时或通信异常",
+                    ErrorCode = lastData?.ErrorCode ?? -1,
+                    StatusCode = lastData?.RunningStatusCode ?? -1
+                };
+            }
         }
 
-        private string GenerateTailProcessData(string barcode, ScrewInstallationResult screwResult)
+        private string GenerateTailProcessData(string barcode, TighteningResult tighteningResult)
         {
             LogManager.LogInfo($"生成尾椎安装工序数据: {barcode}");
 
@@ -498,34 +584,64 @@ namespace TailInstallationSystem
                 processName = "安装尾椎",
                 barcodes = new[]
                 {
-                    new { codeType = "A", barcode = barcode }
-                },
+            new { codeType = "A", barcode = barcode }
+        },
                 testItems = testItems.Select(item => new
                 {
                     id = item.Id,
                     itemName = item.ItemName,
                     itemType = item.ItemType,
-                    pass = screwResult.Success,
-                    resultText = screwResult.Success ? "扭矩达标" : "扭矩不足",
-                    // 添加扭矩详细数据作为子项
-                    subItems = item.Id == 37 ? new[]
+                    pass = tighteningResult.Success,
+                    resultText = tighteningResult.QualityResult,
+                    // 添加拧紧轴详细数据作为子项
+                    subItems = item.Id == 37 ? new object[]  // 明确指定为 object[]
                     {
-                        new
-                        {
-                            name = "Torque",
-                            value = (double)screwResult.Torque,
-                            unit = "Nm",
-                            pass = screwResult.Success
-                        }
+                new
+                {
+                    name = "CompletedTorque",
+                    value = (double)tighteningResult.Torque,        // 显式转换为double
+                    unit = "Nm",
+                    pass = tighteningResult.Success
+                },
+                new
+                {
+                    name = "TargetTorque",
+                    value = (double)tighteningResult.TargetTorque,  // 显式转换为double
+                    unit = "Nm",
+                    pass = true
+                },
+                new
+                {
+                    name = "TorqueRange",
+                    value = $"{tighteningResult.LowerLimitTorque:F2}-{tighteningResult.UpperLimitTorque:F2}",
+                    unit = "Nm",
+                    pass = true
+                },
+                new
+                {
+                    name = "AchievementRate",
+                    value = tighteningResult.TorqueAchievementRate,
+                    unit = "%",
+                    pass = tighteningResult.Success
+                },
+                new
+                {
+                    name = "StatusCode",
+                    value = tighteningResult.StatusCode,
+                    unit = "",
+                    pass = tighteningResult.Success
+                }
                     } : null
                 }).ToArray()
             };
 
             string jsonResult = JsonConvert.SerializeObject(processData, Formatting.Indented);
+
             LogManager.LogInfo($"尾椎安装工序数据生成完成");
             LogManager.LogInfo($"测试项数量: {testItems.Length}");
-            LogManager.LogInfo($"扭矩值: {screwResult.Torque}Nm");
-            LogManager.LogInfo($"测试结果: {(screwResult.Success ? "通过" : "失败")}");
+            LogManager.LogInfo($"完成扭矩: {tighteningResult.Torque:F2}Nm");
+            LogManager.LogInfo($"目标扭矩: {tighteningResult.TargetTorque:F2}Nm");
+            LogManager.LogInfo($"测试结果: {(tighteningResult.Success ? "通过" : "失败")} - {tighteningResult.QualityResult}");
 
             return jsonResult;
         }
@@ -533,6 +649,7 @@ namespace TailInstallationSystem
         private string CombineAllProcessData(string tailProcessData, string[] processDataArray)
         {
             var allProcesses = new List<object>();
+
             // 添加前三道工序数据
             foreach (var processJson in processDataArray)
             {
@@ -549,6 +666,7 @@ namespace TailInstallationSystem
                     }
                 }
             }
+
             // 添加尾椎安装数据
             if (!string.IsNullOrEmpty(tailProcessData))
             {
@@ -562,6 +680,7 @@ namespace TailInstallationSystem
                     allProcesses.Add(new { error = "尾椎数据解析失败", originalData = tailProcessData });
                 }
             }
+
             string combinedData = JsonConvert.SerializeObject(allProcesses, Formatting.Indented);
             LogManager.LogInfo($"合并所有工序数据完成，总共 {allProcesses.Count} 道工序");
             return combinedData;
@@ -603,6 +722,11 @@ namespace TailInstallationSystem
                     cachedBarcode = null;
                 }
 
+                lock (tighteningDataLock)
+                {
+                    latestTighteningData = null;
+                }
+
                 // 正确清空队列
                 lock (processDataLock)
                 {
@@ -619,11 +743,21 @@ namespace TailInstallationSystem
             }
         }
 
-        public class ScrewInstallationResult
+        // 拧紧结果类 
+        public class TighteningResult
         {
-            public decimal Torque { get; set; }
-            public DateTime InstallTime { get; set; }
+            public float Torque { get; set; }
+            public float TargetTorque { get; set; }
+            public float LowerLimitTorque { get; set; }
+            public float UpperLimitTorque { get; set; }
+            public DateTime TighteningTime { get; set; }
             public bool Success { get; set; }
+            public string QualityResult { get; set; }
+            public int ErrorCode { get; set; }
+            public int StatusCode { get; set; }
+            public int QualifiedCount { get; set; }
+            public double TorqueAchievementRate { get; set; }
         }
+
     }
 }

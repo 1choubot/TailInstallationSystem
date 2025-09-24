@@ -91,6 +91,7 @@ namespace TailInstallationSystem.Utils
             }
             return _currentConfig;
         }
+
         public static void SaveConfig(CommunicationConfig config)
         {
             try
@@ -131,6 +132,7 @@ namespace TailInstallationSystem.Utils
                 throw;
             }
         }
+
         // 验证当前配置的公共方法
         public static ValidationResult ValidateCurrentConfig()
         {
@@ -205,7 +207,7 @@ namespace TailInstallationSystem.Utils
             {
                 PLC = new PLCConfig(),
                 Scanner = new ScannerConfig(),
-                ScrewDriver = new ScrewDriverConfig(),
+                TighteningAxis = new TighteningAxisConfig(), 
                 PC = new PCConfig(),
                 Server = new ServerConfig(),
                 System = new SystemSettings()

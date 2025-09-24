@@ -17,6 +17,7 @@ namespace TailInstallationSystem.View
         // 状态锁，保证线程安全
         private readonly object disposeLock = new object();
         private volatile bool isDisposed = false;
+
         private enum DeviceStatus
         {
             Connected,      // 已连接 - 绿色
@@ -45,7 +46,7 @@ namespace TailInstallationSystem.View
                 commManager.OnDeviceConnectionChanged += OnDeviceConnectionChanged;
                 commManager.OnDataReceived += OnDataReceived;
                 commManager.OnBarcodeScanned += OnBarcodeScanned;
-                commManager.OnScrewDataReceived += OnScrewDataReceived;
+                commManager.OnTighteningDataReceived += OnTighteningDataReceived; 
             }
 
             if (controller != null)
@@ -55,16 +56,14 @@ namespace TailInstallationSystem.View
             }
 
             InitializeStatusTimer();
-
             InitializeDefaultState();
         }
 
-        
         private void InitializeDefaultState()
         {
             UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
             UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
-            UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
+            UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected); 
             UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
 
             currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
@@ -95,18 +94,14 @@ namespace TailInstallationSystem.View
         {
             try
             {
-                // statusLabel.Text = "正在启动系统..."; 
                 UpdateProgress(10);
                 await controller.StartSystem();
-                // statusLabel.Text = "系统运行中";
                 btnStart.Enabled = false;
                 btnStop.Enabled = true;
                 UpdateProgress(100);
 
-                // Start status monitoring
                 StartStatusMonitoring();
 
-                // Update system status
                 currentStatusLabel.Text = "状态: 系统运行中";
 
                 LogManager.LogInfo("系统启动成功");
@@ -114,7 +109,6 @@ namespace TailInstallationSystem.View
             catch (Exception ex)
             {
                 MessageBox.Show($"启动失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                // statusLabel.Text = "启动失败";
                 UpdateProgress(0);
                 LogManager.LogError($"系统启动失败: {ex.Message}");
             }
@@ -137,7 +131,7 @@ namespace TailInstallationSystem.View
                 // 重置设备状态...
                 UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
-                UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
+                UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected); 
                 UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
 
                 currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
@@ -151,7 +145,6 @@ namespace TailInstallationSystem.View
                 LogManager.LogError($"系统停止失败: {ex.Message}");
             }
         }
-
 
         private void btnSettings_Click(object sender, EventArgs e)
         {
@@ -178,7 +171,7 @@ namespace TailInstallationSystem.View
                 // 重置所有设备状态...
                 UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
-                UpdateDeviceStatus("ScrewDriver", DeviceStatus.Disconnected);
+                UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected); 
                 UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
 
                 currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
@@ -187,7 +180,6 @@ namespace TailInstallationSystem.View
                 LogManager.LogWarning("系统紧急停止");
             }
         }
-
 
         private void btnClearLog_Click(object sender, EventArgs e)
         {
@@ -205,32 +197,6 @@ namespace TailInstallationSystem.View
             progressBar.Value = value;
         }
 
-        private void UpdateConnectionStatus(bool connected = true)
-        {
-            if (InvokeRequired)
-            {
-                Invoke(new Action<bool>(UpdateConnectionStatus), connected);
-                return;
-            }
-            var statusColor = connected ? Color.FromArgb(82, 196, 26) : Color.FromArgb(255, 77, 79);
-            var statusText = connected ? "已连接" : "未连接";
-            plcIndicator.BackColor = statusColor;
-            plcStatusLabel.Text = statusText;
-            plcStatusLabel.ForeColor = statusColor;
-            scannerIndicator.BackColor = statusColor;
-            scannerStatusLabel.Text = statusText;
-            scannerStatusLabel.ForeColor = statusColor;
-            screwIndicator.BackColor = statusColor;
-            screwStatusLabel.Text = statusText;
-            screwStatusLabel.ForeColor = statusColor;
-            var pcColor = connected ? Color.FromArgb(250, 173, 20) : Color.FromArgb(255, 77, 79);
-            var pcText = connected ? "等待数据" : "未连接";
-            pcIndicator.BackColor = pcColor;
-            pcStatusLabel.Text = pcText;
-            pcStatusLabel.ForeColor = pcColor;
-        }
-
-        
         private void UpdateDeviceStatus(string deviceName, DeviceStatus status)
         {
             if (InvokeRequired)
@@ -286,10 +252,10 @@ namespace TailInstallationSystem.View
                         scannerStatusLabel.Text = statusText;
                         scannerStatusLabel.ForeColor = statusColor;
                         break;
-                    case "SCREWDRIVER":
-                        screwIndicator.BackColor = statusColor;
-                        screwStatusLabel.Text = statusText;
-                        screwStatusLabel.ForeColor = statusColor;
+                    case "TIGHTENINGAXIS": 
+                        tighteningAxisIndicator.BackColor = statusColor;
+                        tighteningAxisStatusLabel.Text = statusText;
+                        tighteningAxisStatusLabel.ForeColor = statusColor;
                         break;
                     case "PC":
                         pcIndicator.BackColor = statusColor;
@@ -309,7 +275,6 @@ namespace TailInstallationSystem.View
 
         #region Communication Event Handlers
 
-        
         private void OnDeviceConnectionChanged(string deviceName, bool isConnected)
         {
             var status = isConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected;
@@ -318,7 +283,6 @@ namespace TailInstallationSystem.View
             string statusText = isConnected ? "已连接" : "断开连接";
             LogManager.LogInfo($"设备状态变化: {deviceName} {statusText}");
         }
-
 
         private void OnDataReceived(string data)
         {
@@ -357,23 +321,42 @@ namespace TailInstallationSystem.View
             }
         }
 
-        private void OnScrewDataReceived(string screwData)
+        private void OnTighteningDataReceived(TighteningAxisData tighteningData)
         {
             if (CheckDisposed()) return;
             try
             {
-                SafeInvoke(() => UpdateDeviceStatus("ScrewDriver", DeviceStatus.Working));
-                LogManager.LogInfo("螺丝机执行安装操作");
-                _ = SafeDelayedAction(3000, () =>
+                SafeInvoke(() =>
                 {
-                    SafeInvoke(() => UpdateDeviceStatus("ScrewDriver", DeviceStatus.Connected));
+                    if (tighteningData.IsRunning)
+                    {
+                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Working);
+                        LogManager.LogInfo($"拧紧轴运行中 - 实时扭矩: {tighteningData.RealtimeTorque:F2}Nm");
+                    }
+                    else if (tighteningData.IsOperationCompleted)
+                    {
+                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Connected);
+                        LogManager.LogInfo($"拧紧操作完成 - 完成扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
+                    }
+                    else
+                    {
+                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Connected);
+                    }
+
+                    // 如果有错误，显示错误状态
+                    if (tighteningData.HasError)
+                    {
+                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected);
+                        LogManager.LogError($"拧紧轴错误: 错误代码{tighteningData.ErrorCode}");
+                    }
                 });
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"螺丝机事件处理异常: {ex.Message}");
+                LogManager.LogError($"拧紧轴数据接收事件处理异常: {ex.Message}");
             }
         }
+
         private void SafeInvoke(Action action)
         {
             if (CheckDisposed()) return;
@@ -410,6 +393,7 @@ namespace TailInstallationSystem.View
                 LogManager.LogError($"UI调用异常: {ex.Message}");
             }
         }
+
         private async Task SafeDelayedAction(int delayMs, Action action)
         {
             try
@@ -430,6 +414,7 @@ namespace TailInstallationSystem.View
                 LogManager.LogError($"延迟执行异常: {ex.Message}");
             }
         }
+
         private bool CheckDisposed()
         {
             lock (disposeLock)
@@ -473,11 +458,10 @@ namespace TailInstallationSystem.View
 
         #region Status Monitoring Timer
 
-        
         private void InitializeStatusTimer()
         {
             statusCheckTimer = new System.Windows.Forms.Timer();
-            statusCheckTimer.Interval = 5000; 
+            statusCheckTimer.Interval = 5000;
             statusCheckTimer.Tick += OnStatusTimerTick;
         }
 
@@ -490,8 +474,6 @@ namespace TailInstallationSystem.View
 
             try
             {
-                 //LogManager.LogDebug("执行定期设备状态检查");
-
                 // 实际的健康检查逻辑...
             }
             catch (Exception ex)
@@ -525,7 +507,6 @@ namespace TailInstallationSystem.View
             currentStatusLabel.Text = $"状态: {status}";
         }
 
-
         public void UpdateExternalDeviceStatus(string deviceName, bool isConnected)
         {
             var status = isConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected;
@@ -550,7 +531,7 @@ namespace TailInstallationSystem.View
                         commManager.OnDeviceConnectionChanged -= OnDeviceConnectionChanged;
                         commManager.OnDataReceived -= OnDataReceived;
                         commManager.OnBarcodeScanned -= OnBarcodeScanned;
-                        commManager.OnScrewDataReceived -= OnScrewDataReceived;
+                        commManager.OnTighteningDataReceived -= OnTighteningDataReceived; 
                     }
                     if (controller != null)
                     {
@@ -568,6 +549,5 @@ namespace TailInstallationSystem.View
 
             base.Dispose(disposing);
         }
-
     }
 }

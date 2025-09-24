@@ -35,12 +35,14 @@
             this.pcPortLabel = new AntdUI.Label();
             this.pcIpTextBox = new AntdUI.Input();
             this.pcIpLabel = new AntdUI.Label();
-            this.screwGroupBox = new System.Windows.Forms.GroupBox();
-            this.screwTestButton = new AntdUI.Button();
-            this.screwPortTextBox = new AntdUI.Input();
-            this.screwPortLabel = new AntdUI.Label();
-            this.screwIpLabel = new AntdUI.Label();
-            this.screwIpTextBox = new AntdUI.Input();
+            this.tighteningAxisGroupBox = new System.Windows.Forms.GroupBox();
+            this.tighteningAxisTestButton = new AntdUI.Button();
+            this.tighteningAxisPortTextBox = new AntdUI.Input();
+            this.tighteningAxisPortLabel = new AntdUI.Label();
+            this.tighteningAxisIpLabel = new AntdUI.Label();
+            this.tighteningAxisIpTextBox = new AntdUI.Input();
+            this.tighteningAxisStationTextBox = new AntdUI.Input();
+            this.tighteningAxisStationLabel = new AntdUI.Label();
             this.scannerGroupBox = new System.Windows.Forms.GroupBox();
             this.scannerTestButton = new AntdUI.Button();
             this.scannerPortTextBox = new AntdUI.Input();
@@ -57,7 +59,7 @@
             this.plcIpLabel = new AntdUI.Label();
             this.titleLabel = new AntdUI.Label();
             this.pcGroupBox.SuspendLayout();
-            this.screwGroupBox.SuspendLayout();
+            this.tighteningAxisGroupBox.SuspendLayout();
             this.scannerGroupBox.SuspendLayout();
             this.plcGroupBox.SuspendLayout();
             this.SuspendLayout();
@@ -142,74 +144,103 @@
             this.pcIpLabel.TabIndex = 0;
             this.pcIpLabel.Text = "IP地址:";
             // 
-            // screwGroupBox
+            // tighteningAxisGroupBox - 修改后的拧紧轴组
             // 
-            this.screwGroupBox.Controls.Add(this.screwTestButton);
-            this.screwGroupBox.Controls.Add(this.screwPortTextBox);
-            this.screwGroupBox.Controls.Add(this.screwPortLabel);
-            this.screwGroupBox.Controls.Add(this.screwIpLabel);
-            this.screwGroupBox.Controls.Add(this.screwIpTextBox);
-            this.screwGroupBox.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
-            this.screwGroupBox.Location = new System.Drawing.Point(27, 267);
-            this.screwGroupBox.Margin = new System.Windows.Forms.Padding(4);
-            this.screwGroupBox.Name = "screwGroupBox";
-            this.screwGroupBox.Padding = new System.Windows.Forms.Padding(4);
-            this.screwGroupBox.Size = new System.Drawing.Size(600, 162);
-            this.screwGroupBox.TabIndex = 15;
-            this.screwGroupBox.TabStop = false;
-            this.screwGroupBox.Text = "螺丝机连接设置";
+            this.tighteningAxisGroupBox.Controls.Add(this.tighteningAxisTestButton);
+            this.tighteningAxisGroupBox.Controls.Add(this.tighteningAxisStationTextBox);
+            this.tighteningAxisGroupBox.Controls.Add(this.tighteningAxisStationLabel);
+            this.tighteningAxisGroupBox.Controls.Add(this.tighteningAxisPortTextBox);
+            this.tighteningAxisGroupBox.Controls.Add(this.tighteningAxisPortLabel);
+            this.tighteningAxisGroupBox.Controls.Add(this.tighteningAxisIpLabel);
+            this.tighteningAxisGroupBox.Controls.Add(this.tighteningAxisIpTextBox);
+            this.tighteningAxisGroupBox.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.tighteningAxisGroupBox.Location = new System.Drawing.Point(27, 267);
+            this.tighteningAxisGroupBox.Margin = new System.Windows.Forms.Padding(4);
+            this.tighteningAxisGroupBox.Name = "tighteningAxisGroupBox";
+            this.tighteningAxisGroupBox.Padding = new System.Windows.Forms.Padding(4);
+            this.tighteningAxisGroupBox.Size = new System.Drawing.Size(600, 162);
+            this.tighteningAxisGroupBox.TabIndex = 15;
+            this.tighteningAxisGroupBox.TabStop = false;
+            this.tighteningAxisGroupBox.Text = "拧紧轴连接设置";
+
             // 
-            // screwTestButton
+            // tighteningAxisTestButton
             // 
-            this.screwTestButton.Location = new System.Drawing.Point(440, 106);
-            this.screwTestButton.Margin = new System.Windows.Forms.Padding(4);
-            this.screwTestButton.Name = "screwTestButton";
-            this.screwTestButton.Size = new System.Drawing.Size(133, 38);
-            this.screwTestButton.TabIndex = 4;
-            this.screwTestButton.Text = "测试连接";
-            this.screwTestButton.Type = AntdUI.TTypeMini.Primary;
+            this.tighteningAxisTestButton.Location = new System.Drawing.Point(440, 106);
+            this.tighteningAxisTestButton.Margin = new System.Windows.Forms.Padding(4);
+            this.tighteningAxisTestButton.Name = "tighteningAxisTestButton";
+            this.tighteningAxisTestButton.Size = new System.Drawing.Size(133, 38);
+            this.tighteningAxisTestButton.TabIndex = 4;
+            this.tighteningAxisTestButton.Text = "测试连接";
+            this.tighteningAxisTestButton.Type = AntdUI.TTypeMini.Primary;
+
             // 
-            // screwPortTextBox
+            // tighteningAxisStationTextBox
             // 
-            this.screwPortTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.screwPortTextBox.Location = new System.Drawing.Point(466, 34);
-            this.screwPortTextBox.Margin = new System.Windows.Forms.Padding(4);
-            this.screwPortTextBox.Name = "screwPortTextBox";
-            this.screwPortTextBox.Size = new System.Drawing.Size(107, 35);
-            this.screwPortTextBox.TabIndex = 3;
-            this.screwPortTextBox.Text = "8888";
+            this.tighteningAxisStationTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.tighteningAxisStationTextBox.Location = new System.Drawing.Point(147, 75);
+            this.tighteningAxisStationTextBox.Margin = new System.Windows.Forms.Padding(4);
+            this.tighteningAxisStationTextBox.Name = "tighteningAxisStationTextBox";
+            this.tighteningAxisStationTextBox.Size = new System.Drawing.Size(133, 35);
+            this.tighteningAxisStationTextBox.TabIndex = 5;
+            this.tighteningAxisStationTextBox.Text = "1";
+
             // 
-            // screwPortLabel
+            // tighteningAxisStationLabel
             // 
-            this.screwPortLabel.AutoSizeMode = AntdUI.TAutoSize.Auto;
-            this.screwPortLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.screwPortLabel.Location = new System.Drawing.Point(373, 43);
-            this.screwPortLabel.Margin = new System.Windows.Forms.Padding(4);
-            this.screwPortLabel.Name = "screwPortLabel";
-            this.screwPortLabel.Size = new System.Drawing.Size(45, 20);
-            this.screwPortLabel.TabIndex = 2;
-            this.screwPortLabel.Text = "端口：";
+            this.tighteningAxisStationLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.tighteningAxisStationLabel.Location = new System.Drawing.Point(27, 78);
+            this.tighteningAxisStationLabel.Margin = new System.Windows.Forms.Padding(4);
+            this.tighteningAxisStationLabel.Name = "tighteningAxisStationLabel";
+            this.tighteningAxisStationLabel.Size = new System.Drawing.Size(107, 29);
+            this.tighteningAxisStationLabel.TabIndex = 4;
+            this.tighteningAxisStationLabel.Text = "站号:";
+
             // 
-            // screwIpLabel
+            // tighteningAxisPortTextBox
             // 
-            this.screwIpLabel.AutoSizeMode = AntdUI.TAutoSize.Auto;
-            this.screwIpLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.screwIpLabel.Location = new System.Drawing.Point(27, 44);
-            this.screwIpLabel.Margin = new System.Windows.Forms.Padding(4);
-            this.screwIpLabel.Name = "screwIpLabel";
-            this.screwIpLabel.Size = new System.Drawing.Size(59, 20);
-            this.screwIpLabel.TabIndex = 0;
-            this.screwIpLabel.Text = "IP地址：";
+            this.tighteningAxisPortTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.tighteningAxisPortTextBox.Location = new System.Drawing.Point(466, 34);
+            this.tighteningAxisPortTextBox.Margin = new System.Windows.Forms.Padding(4);
+            this.tighteningAxisPortTextBox.Name = "tighteningAxisPortTextBox";
+            this.tighteningAxisPortTextBox.Size = new System.Drawing.Size(107, 35);
+            this.tighteningAxisPortTextBox.TabIndex = 3;
+            this.tighteningAxisPortTextBox.Text = "502";
+
             // 
-            // screwIpTextBox
+            // tighteningAxisPortLabel
             // 
-            this.screwIpTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.screwIpTextBox.Location = new System.Drawing.Point(147, 34);
-            this.screwIpTextBox.Margin = new System.Windows.Forms.Padding(4);
-            this.screwIpTextBox.Name = "screwIpTextBox";
-            this.screwIpTextBox.Size = new System.Drawing.Size(200, 35);
-            this.screwIpTextBox.TabIndex = 1;
-            this.screwIpTextBox.Text = "192.168.1.102";
+            this.tighteningAxisPortLabel.AutoSizeMode = AntdUI.TAutoSize.Auto;
+            this.tighteningAxisPortLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.tighteningAxisPortLabel.Location = new System.Drawing.Point(373, 43);
+            this.tighteningAxisPortLabel.Margin = new System.Windows.Forms.Padding(4);
+            this.tighteningAxisPortLabel.Name = "tighteningAxisPortLabel";
+            this.tighteningAxisPortLabel.Size = new System.Drawing.Size(45, 20);
+            this.tighteningAxisPortLabel.TabIndex = 2;
+            this.tighteningAxisPortLabel.Text = "端口：";
+
+            // 
+            // tighteningAxisIpLabel
+            // 
+            this.tighteningAxisIpLabel.AutoSizeMode = AntdUI.TAutoSize.Auto;
+            this.tighteningAxisIpLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.tighteningAxisIpLabel.Location = new System.Drawing.Point(27, 44);
+            this.tighteningAxisIpLabel.Margin = new System.Windows.Forms.Padding(4);
+            this.tighteningAxisIpLabel.Name = "tighteningAxisIpLabel";
+            this.tighteningAxisIpLabel.Size = new System.Drawing.Size(59, 20);
+            this.tighteningAxisIpLabel.TabIndex = 0;
+            this.tighteningAxisIpLabel.Text = "IP地址：";
+
+            // 
+            // tighteningAxisIpTextBox
+            // 
+            this.tighteningAxisIpTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.tighteningAxisIpTextBox.Location = new System.Drawing.Point(147, 34);
+            this.tighteningAxisIpTextBox.Margin = new System.Windows.Forms.Padding(4);
+            this.tighteningAxisIpTextBox.Name = "tighteningAxisIpTextBox";
+            this.tighteningAxisIpTextBox.Size = new System.Drawing.Size(200, 35);
+            this.tighteningAxisIpTextBox.TabIndex = 1;
+            this.tighteningAxisIpTextBox.Text = "192.168.0.102";
             // 
             // scannerGroupBox
             // 
@@ -384,7 +415,7 @@
             this.BackColor = System.Drawing.Color.White;
             this.Controls.Add(this.saveButton);
             this.Controls.Add(this.pcGroupBox);
-            this.Controls.Add(this.screwGroupBox);
+            this.Controls.Add(this.tighteningAxisGroupBox);
             this.Controls.Add(this.scannerGroupBox);
             this.Controls.Add(this.plcGroupBox);
             this.Controls.Add(this.titleLabel);
@@ -393,8 +424,8 @@
             this.Padding = new System.Windows.Forms.Padding(13, 12, 13, 25);
             this.Size = new System.Drawing.Size(1280, 538);
             this.pcGroupBox.ResumeLayout(false);
-            this.screwGroupBox.ResumeLayout(false);
-            this.screwGroupBox.PerformLayout();
+            this.tighteningAxisGroupBox.ResumeLayout(false); // 修改控件名称
+            this.tighteningAxisGroupBox.PerformLayout();
             this.scannerGroupBox.ResumeLayout(false);
             this.plcGroupBox.ResumeLayout(false);
             this.ResumeLayout(false);
@@ -410,12 +441,17 @@
         private AntdUI.Label pcPortLabel;
         private AntdUI.Input pcIpTextBox;
         private AntdUI.Label pcIpLabel;
-        private System.Windows.Forms.GroupBox screwGroupBox;
-        private AntdUI.Button screwTestButton;
-        private AntdUI.Input screwPortTextBox;
-        private AntdUI.Label screwPortLabel;
-        private AntdUI.Label screwIpLabel;
-        private AntdUI.Input screwIpTextBox;
+
+        // 修改后的拧紧轴控件声明
+        private System.Windows.Forms.GroupBox tighteningAxisGroupBox;
+        private AntdUI.Button tighteningAxisTestButton;
+        private AntdUI.Input tighteningAxisPortTextBox;
+        private AntdUI.Label tighteningAxisPortLabel;
+        private AntdUI.Label tighteningAxisIpLabel;
+        private AntdUI.Input tighteningAxisIpTextBox;
+        private AntdUI.Input tighteningAxisStationTextBox;
+        private AntdUI.Label tighteningAxisStationLabel;
+
         private System.Windows.Forms.GroupBox scannerGroupBox;
         private AntdUI.Button scannerTestButton;
         private AntdUI.Input scannerPortTextBox;

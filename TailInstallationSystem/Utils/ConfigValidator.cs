@@ -25,8 +25,8 @@ namespace TailInstallationSystem.Utils
             // 验证扫码枪配置
             ValidateScannerConfig(config.Scanner, result);
 
-            // 验证螺丝机配置
-            ValidateScrewDriverConfig(config.ScrewDriver, result);
+            // 验证拧紧轴配置
+            ValidateTighteningAxisConfig(config.TighteningAxis, result);
 
             // 验证PC配置
             ValidatePCConfig(config.PC, result);
@@ -111,29 +111,105 @@ namespace TailInstallationSystem.Utils
             }
         }
 
-        private static void ValidateScrewDriverConfig(ScrewDriverConfig screwDriver, ValidationResult result)
+        // 拧紧轴配置验证方法
+        private static void ValidateTighteningAxisConfig(TighteningAxisConfig tighteningAxis, ValidationResult result)
         {
-            if (screwDriver == null)
+            if (tighteningAxis == null)
             {
-                result.AddError("螺丝机配置为空");
+                result.AddError("拧紧轴配置为空");
                 return;
             }
 
-            ValidateIPAndPort(screwDriver.IP, screwDriver.Port, "螺丝机", result);
+            // 验证基本网络配置
+            ValidateIPAndPort(tighteningAxis.IP, tighteningAxis.Port, "拧紧轴", result);
 
-            if (screwDriver.TimeoutSeconds < 1 || screwDriver.TimeoutSeconds > 300)
+            // 验证Modbus站号
+            if (tighteningAxis.Station < 1 || tighteningAxis.Station > 247)
             {
-                result.AddError($"螺丝机超时时间无效: {screwDriver.TimeoutSeconds}秒，建议在1-300秒范围内");
+                result.AddError($"拧紧轴Modbus站号无效: {tighteningAxis.Station}，必须在1-247范围内");
             }
 
-            if (screwDriver.MinTorque < 0 || screwDriver.MaxTorque <= screwDriver.MinTorque)
+            // 验证超时配置
+            if (tighteningAxis.TimeoutSeconds < 1 || tighteningAxis.TimeoutSeconds > 300)
             {
-                result.AddError($"螺丝机扭矩范围无效: {screwDriver.MinTorque}-{screwDriver.MaxTorque}Nm");
+                result.AddError($"拧紧轴超时时间无效: {tighteningAxis.TimeoutSeconds}秒，建议在1-300秒范围内");
             }
 
-            if (string.IsNullOrWhiteSpace(screwDriver.CommandFormat))
+            // 验证轮询间隔
+            if (tighteningAxis.StatusPollingIntervalMs < 100 || tighteningAxis.StatusPollingIntervalMs > 5000)
             {
-                result.AddWarning("螺丝机命令格式未设置，将使用默认值ASCII");
+                result.AddError($"拧紧轴状态轮询间隔无效: {tighteningAxis.StatusPollingIntervalMs}毫秒，建议在100-5000毫秒范围内");
+            }
+
+            // 验证最大操作超时时间
+            if (tighteningAxis.MaxOperationTimeoutSeconds < 5 || tighteningAxis.MaxOperationTimeoutSeconds > 300)
+            {
+                result.AddError($"拧紧轴最大操作超时时间无效: {tighteningAxis.MaxOperationTimeoutSeconds}秒，建议在5-300秒范围内");
+            }
+
+            // 验证扭矩范围
+            if (tighteningAxis.MinTorque < 0 || tighteningAxis.MaxTorque <= tighteningAxis.MinTorque)
+            {
+                result.AddError($"拧紧轴扭矩范围无效: {tighteningAxis.MinTorque}-{tighteningAxis.MaxTorque}Nm");
+            }
+
+            // 验证寄存器地址配置
+            ValidateModbusRegisterAddresses(tighteningAxis.Registers, result);
+
+            // 特殊验证：检查拧紧轴的默认IP是否正确
+            if (tighteningAxis.IP == "192.168.0.102" && tighteningAxis.Port != 502)
+            {
+                result.AddWarning("拧紧轴使用标准IP地址但端口不是标准的502，请确认配置是否正确");
+            }
+        }
+
+        // 验证Modbus寄存器地址配置
+        private static void ValidateModbusRegisterAddresses(ModbusRegisterAddresses registers, ValidationResult result)
+        {
+            if (registers == null)
+            {
+                result.AddError("拧紧轴寄存器地址配置为空");
+                return;
+            }
+
+            // 验证关键寄存器地址范围（基于说明书中的地址范围5000-5102）
+            var addressesToCheck = new Dictionary<string, int>
+            {
+                ["控制命令字"] = registers.ControlCommand,
+                ["运行状态"] = registers.RunningStatus,
+                ["错误代码"] = registers.ErrorCode,
+                ["完成扭矩"] = registers.CompletedTorque,
+                ["实时扭矩"] = registers.RealtimeTorque,
+                ["目标扭矩"] = registers.TargetTorque,
+                ["下限扭矩"] = registers.LowerLimitTorque,
+                ["上限扭矩"] = registers.UpperLimitTorque,
+                ["合格数记录"] = registers.QualifiedCount,
+                ["紧固模式"] = registers.TighteningMode,
+                ["实时角度"] = registers.RealtimeAngle
+            };
+
+            foreach (var address in addressesToCheck)
+            {
+                if (address.Value < 5000 || address.Value > 5102)
+                {
+                    result.AddWarning($"拧紧轴{address.Key}地址({address.Value})超出标准范围(5000-5102)，请确认是否正确");
+                }
+            }
+
+            // 检查关键地址是否为偶数（32位浮点数必须从偶数地址开始）
+            var criticalAddresses = new Dictionary<string, int>
+            {
+                ["控制命令字"] = registers.ControlCommand,
+                ["运行状态"] = registers.RunningStatus,
+                ["完成扭矩"] = registers.CompletedTorque
+            };
+
+            foreach (var address in criticalAddresses)
+            {
+                if (address.Value % 2 != 0)
+                {
+                    result.AddError($"拧紧轴{address.Key}地址({address.Value})必须为偶数地址，因为32位数据占用2个寄存器");
+                }
             }
         }
 

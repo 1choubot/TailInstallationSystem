@@ -18,10 +18,9 @@ namespace TailInstallationSystem
         {
             InitializeComponent();
             this.AutoScroll = true;
-            // 事件绑定
             plcTestButton.Click += plcTestButton_Click;
             scannerTestButton.Click += scannerTestButton_Click;
-            screwTestButton.Click += screwTestButton_Click;
+            tighteningAxisTestButton.Click += tighteningAxisTestButton_Click;
             pcTestButton.Click += pcTestButton_Click;
             saveButton.Click += saveButton_Click;
             LoadSettings();
@@ -39,7 +38,7 @@ namespace TailInstallationSystem
                 _config = ConfigManager.LoadConfig();
                 LoadPLCSettings();
                 LoadScannerSettings();
-                LoadScrewDriverSettings();
+                LoadTighteningAxisSettings();
                 LoadPCSettings();
 
                 LogManager.LogInfo("通讯设置界面已加载");
@@ -63,10 +62,11 @@ namespace TailInstallationSystem
             scannerPortTextBox.Text = _config.Scanner.Port.ToString();
         }
 
-        private void LoadScrewDriverSettings()
+        private void LoadTighteningAxisSettings()
         {
-            screwIpTextBox.Text = _config.ScrewDriver.IP;
-            screwPortTextBox.Text = _config.ScrewDriver.Port.ToString();
+            tighteningAxisIpTextBox.Text = _config.TighteningAxis.IP;
+            tighteningAxisPortTextBox.Text = _config.TighteningAxis.Port.ToString();
+            tighteningAxisStationTextBox.Text = _config.TighteningAxis.Station.ToString();
         }
 
         private void LoadPCSettings()
@@ -156,49 +156,49 @@ namespace TailInstallationSystem
             }
         }
 
-        private async void screwTestButton_Click(object sender, EventArgs e)
+        private async void tighteningAxisTestButton_Click(object sender, EventArgs e)
         {
-            if (!ValidateScrewDriverInput()) return;
+            if (!ValidateTighteningAxisInput()) return;
 
             try
             {
-                screwTestButton.Loading = true;
-                screwTestButton.Text = "测试中...";
-                screwTestButton.Enabled = false;
+                tighteningAxisTestButton.Loading = true;
+                tighteningAxisTestButton.Text = "测试中...";
+                tighteningAxisTestButton.Enabled = false;
 
-                var ip = screwIpTextBox.Text.Trim();
-                var port = int.Parse(screwPortTextBox.Text.Trim());
+                var ip = tighteningAxisIpTextBox.Text.Trim();
+                var port = int.Parse(tighteningAxisPortTextBox.Text.Trim());
+                var station = byte.Parse(tighteningAxisStationTextBox.Text.Trim());
 
-                LogManager.LogInfo($"测试螺丝机连接: {ip}:{port}");
+                LogManager.LogInfo($"测试拧紧轴连接: {ip}:{port}, 站号:{station}");
 
-                bool success = await TestTcpConnection(ip, port, "螺丝机");
+                bool success = await TestTighteningAxisConnection(ip, port, station);
 
                 if (success)
                 {
-                    AntdUI.Message.success(GetParentForm(), "螺丝机连接测试成功！", autoClose: 3);
+                    AntdUI.Message.success(GetParentForm(), "拧紧轴连接测试成功！", autoClose: 3);
                 }
                 else
                 {
-                    AntdUI.Message.error(GetParentForm(), "螺丝机连接测试失败！", autoClose: 3);
+                    AntdUI.Message.error(GetParentForm(), "拧紧轴连接测试失败！", autoClose: 3);
                 }
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"螺丝机连接测试失败: {ex.Message}");
-                AntdUI.Message.error(GetParentForm(), $"螺丝机连接测试失败: {ex.Message}", autoClose: 3);
+                LogManager.LogError($"拧紧轴连接测试失败: {ex.Message}");
+                AntdUI.Message.error(GetParentForm(), $"拧紧轴连接测试失败: {ex.Message}", autoClose: 3);
             }
             finally
             {
-                screwTestButton.Loading = false;
-                screwTestButton.Text = "测试连接";
-                screwTestButton.Enabled = true;
+                tighteningAxisTestButton.Loading = false;
+                tighteningAxisTestButton.Text = "测试连接";
+                tighteningAxisTestButton.Enabled = true;
             }
         }
 
         private async void pcTestButton_Click(object sender, EventArgs e)
         {
             if (!ValidatePCInput()) return;
-
             try
             {
                 pcTestButton.Loading = true;
@@ -261,13 +261,49 @@ namespace TailInstallationSystem
             }
         }
 
+        private async Task<bool> TestTighteningAxisConnection(string ip, int port, byte station)
+        {
+            try
+            {
+                var modbusTcpClient = new ModbusTcpNet(ip, port, station);
+                var connectResult = await Task.Run(() => modbusTcpClient.ConnectServer());
+
+                if (connectResult.IsSuccess)
+                {
+                    // 尝试读取拧紧轴的运行状态寄存器来测试连接
+                    var readResult = await Task.Run(() => modbusTcpClient.ReadFloat("5100", 1));
+                    modbusTcpClient.ConnectClose();
+
+                    if (readResult.IsSuccess)
+                    {
+                        LogManager.LogInfo($"拧紧轴测试读取成功，运行状态值: {readResult.Content[0]}");
+                        return true;
+                    }
+                    else
+                    {
+                        LogManager.LogWarning($"拧紧轴连接成功但读取数据失败: {readResult.Message}");
+                        return false;
+                    }
+                }
+                else
+                {
+                    LogManager.LogWarning($"拧紧轴Modbus连接失败: {connectResult.Message}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"拧紧轴连接测试异常: {ex.Message}");
+                return false;
+            }
+        }
+
         private async Task<bool> TestTcpConnection(string ip, int port, string deviceName)
         {
             try
             {
                 using (var tcpClient = new TcpClient())
                 {
-                    // 设置连接超时
                     tcpClient.ReceiveTimeout = 5000;
                     tcpClient.SendTimeout = 5000;
 
@@ -357,27 +393,40 @@ namespace TailInstallationSystem
             return true;
         }
 
-        private bool ValidateScrewDriverInput()
+        private bool ValidateTighteningAxisInput()
         {
-            if (string.IsNullOrWhiteSpace(screwIpTextBox.Text))
+            if (string.IsNullOrWhiteSpace(tighteningAxisIpTextBox.Text))
             {
-                AntdUI.Message.error(GetParentForm(), "请输入螺丝机IP地址", autoClose: 3);
-                screwIpTextBox.Focus();
+                AntdUI.Message.error(GetParentForm(), "请输入拧紧轴IP地址", autoClose: 3);
+                tighteningAxisIpTextBox.Focus();
                 return false;
             }
 
-            if (!IPAddress.TryParse(screwIpTextBox.Text.Trim(), out _))
+            if (!IPAddress.TryParse(tighteningAxisIpTextBox.Text.Trim(), out _))
             {
-                AntdUI.Message.error(GetParentForm(), "螺丝机IP地址格式不正确", autoClose: 3);
-                screwIpTextBox.Focus();
+                AntdUI.Message.error(GetParentForm(), "拧紧轴IP地址格式不正确", autoClose: 3);
+                tighteningAxisIpTextBox.Focus();
                 return false;
             }
 
-            if (!int.TryParse(screwPortTextBox.Text.Trim(), out int port) || port < 1 || port > 65535)
+            if (!int.TryParse(tighteningAxisPortTextBox.Text.Trim(), out int port) || port < 1 || port > 65535)
             {
-                AntdUI.Message.error(GetParentForm(), "螺丝机端口号必须在1-65535之间", autoClose: 3);
-                screwPortTextBox.Focus();
+                AntdUI.Message.error(GetParentForm(), "拧紧轴端口号必须在1-65535之间", autoClose: 3);
+                tighteningAxisPortTextBox.Focus();
                 return false;
+            }
+
+            if (!byte.TryParse(tighteningAxisStationTextBox.Text.Trim(), out byte station))
+            {
+                AntdUI.Message.error(GetParentForm(), "拧紧轴Modbus站号格式不正确", autoClose: 3);
+                tighteningAxisStationTextBox.Focus();
+                return false;
+            }
+
+            // 验证端口是否为Modbus标准端口
+            if (port != 502)
+            {
+                AntdUI.Message.warn(GetParentForm(), "拧紧轴通常使用Modbus TCP端口502，请确认端口配置", autoClose: 5);
             }
 
             return true;
@@ -413,7 +462,7 @@ namespace TailInstallationSystem
         {
             return ValidatePLCInput() &&
                    ValidateScannerInput() &&
-                   ValidateScrewDriverInput() &&
+                   ValidateTighteningAxisInput() &&
                    ValidatePCInput();
         }
 
@@ -447,8 +496,9 @@ namespace TailInstallationSystem
             _config.Scanner.IP = scannerIpTextBox.Text.Trim();
             _config.Scanner.Port = int.Parse(scannerPortTextBox.Text.Trim());
 
-            _config.ScrewDriver.IP = screwIpTextBox.Text.Trim();
-            _config.ScrewDriver.Port = int.Parse(screwPortTextBox.Text.Trim());
+            _config.TighteningAxis.IP = tighteningAxisIpTextBox.Text.Trim();
+            _config.TighteningAxis.Port = int.Parse(tighteningAxisPortTextBox.Text.Trim());
+            _config.TighteningAxis.Station = byte.Parse(tighteningAxisStationTextBox.Text.Trim());
 
             _config.PC.IP = pcIpTextBox.Text.Trim();
             _config.PC.Port = int.Parse(pcPortTextBox.Text.Trim());

@@ -1,6 +1,7 @@
 ﻿using AntdUI;
 using System;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 using TailInstallationSystem.Utils;
 
@@ -12,20 +13,39 @@ namespace TailInstallationSystem
         private TailInstallationController controller;
         private UserControl currentUserControl;
         private View.SystemMonitorControl systemMonitorControl;
-        private View.SystemLogControl systemLogControl; 
+        private View.SystemLogControl systemLogControl;
+        private LicenseManager licenseManager;
+        private bool isLicenseValid = false;
 
         public MainWindow()
         {
             InitializeComponent();
             InitializeEvents();
-            InitializeCommunication();
             InitializeLogging();
-            // 启动时默认显示系统监控界面
-            ShowSystemMonitor();
-            UpdateMenuButtonState(btnSystemMonitor);
+            licenseManager = new LicenseManager();
+            licenseManager.CheckActive();
+            isLicenseValid = licenseManager.ShowActive();
 
+            if (isLicenseValid)
+            {
+                InitializeCommunication();
+                ShowSystemMonitor();
+                UpdateMenuButtonState(btnSystemMonitor);
+            }
+            else
+            {
+                // 如果授权失败，关闭程序
+                this.Load += (s, e) => {
+                    MessageBox.Show("授权验证失败，程序将退出", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Application.Exit();
+                };
+            }
+
+            //InitializeCommunication();
+            //// 启动时默认显示系统监控界面
+            //ShowSystemMonitor();
+            //UpdateMenuButtonState(btnSystemMonitor);
         }
-
 
         private void InitializeEvents()
         {
@@ -49,7 +69,7 @@ namespace TailInstallationSystem
                 commManager.OnDeviceConnectionChanged += OnDeviceConnectionChanged;
                 commManager.OnDataReceived += OnDataReceived;
                 commManager.OnBarcodeScanned += OnBarcodeScanned;
-                commManager.OnScrewDataReceived += OnScrewDataReceived;
+                commManager.OnTighteningDataReceived += OnTighteningDataReceived; 
                 commManager.OnPLCTrigger += OnPLCTrigger;
 
                 controller = new TailInstallationController(commManager);
@@ -71,24 +91,28 @@ namespace TailInstallationSystem
 
         private void btnSystemMonitor_Click(object sender, EventArgs e)
         {
+            if (!isLicenseValid) return;
             ShowSystemMonitor();
             UpdateMenuButtonState(btnSystemMonitor);
         }
 
         private void btnCommSettings_Click(object sender, EventArgs e)
         {
+            if (!isLicenseValid) return;
             ShowCommunicationSettings();
             UpdateMenuButtonState(btnCommSettings);
         }
 
         private void btnDataView_Click(object sender, EventArgs e)
         {
+            if (!isLicenseValid) return;
             ShowDataView();
             UpdateMenuButtonState(btnDataView);
         }
 
         private void btnUserManage_Click(object sender, EventArgs e)
         {
+            if (!isLicenseValid) return;
             ShowUserManagement();
             UpdateMenuButtonState(btnUserManage);
         }
@@ -222,13 +246,40 @@ namespace TailInstallationSystem
         }
 
         /// <summary>
-        /// 螺丝机数据事件处理
+        /// 拧紧轴数据事件处理 
         /// </summary>
-        private void OnScrewDataReceived(string screwData)
+        private void OnTighteningDataReceived(TighteningAxisData tighteningData)
         {
-            LogManager.LogInfo($"主窗口收到螺丝机数据: {screwData}");
+            if (InvokeRequired)
+            {
+                Invoke(new Action<TighteningAxisData>(OnTighteningDataReceived), tighteningData);
+                return;
+            }
 
-            // 处理螺丝机返回的扭矩数据等
+            // 记录拧紧轴数据
+            LogManager.LogInfo($"主窗口收到拧紧轴数据: {tighteningData.GetStatusDescription()}");
+
+            // 如果当前是系统监控界面，可以更新拧紧状态显示
+            if (currentUserControl is View.SystemMonitorControl monitorControl)
+            {
+                // 更新拧紧轴状态显示
+                if (tighteningData.IsRunning)
+                {
+                    monitorControl.UpdateExternalDeviceStatus("TighteningAxis", true);
+                }
+                else if (tighteningData.IsOperationCompleted)
+                {
+                    // 操作完成，显示结果
+                    string resultMessage = tighteningData.IsQualified ? "拧紧合格" : $"拧紧不合格: {tighteningData.QualityResult}";
+                    LogManager.LogInfo($"拧紧操作完成: {resultMessage}");
+                }
+
+                // 如果有错误，记录错误信息
+                if (tighteningData.HasError)
+                {
+                    LogManager.LogError($"拧紧轴错误: 错误代码{tighteningData.ErrorCode}");
+                }
+            }
         }
 
         /// <summary>
@@ -275,13 +326,12 @@ namespace TailInstallationSystem
                     controller.StopSystem();
                 }
 
-                // 取消事件订阅
                 if (commManager != null)
                 {
                     commManager.OnDeviceConnectionChanged -= OnDeviceConnectionChanged;
                     commManager.OnDataReceived -= OnDataReceived;
                     commManager.OnBarcodeScanned -= OnBarcodeScanned;
-                    commManager.OnScrewDataReceived -= OnScrewDataReceived;
+                    commManager.OnTighteningDataReceived -= OnTighteningDataReceived; 
                     commManager.OnPLCTrigger -= OnPLCTrigger;
 
                     commManager.Dispose();

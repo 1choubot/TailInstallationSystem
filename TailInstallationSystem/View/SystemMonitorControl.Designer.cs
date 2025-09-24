@@ -49,8 +49,8 @@
             this.pcStatusLabel = new AntdUI.Label();
             this.pcTitleLabel = new AntdUI.Label();
             this.screwStatusCard = new AntdUI.Panel();
-            this.screwIndicator = new AntdUI.Panel();
-            this.screwStatusLabel = new AntdUI.Label();
+            this.tighteningAxisIndicator = new AntdUI.Panel();
+            this.tighteningAxisStatusLabel = new AntdUI.Label();
             this.screwTitleLabel = new AntdUI.Label();
             this.scannerStatusCard = new AntdUI.Panel();
             this.scannerIndicator = new AntdUI.Panel();
@@ -296,31 +296,31 @@
             // screwStatusCard
             // 
             this.screwStatusCard.BackColor = System.Drawing.Color.White;
-            this.screwStatusCard.Controls.Add(this.screwIndicator);
-            this.screwStatusCard.Controls.Add(this.screwStatusLabel);
+            this.screwStatusCard.Controls.Add(this.tighteningAxisIndicator);
+            this.screwStatusCard.Controls.Add(this.tighteningAxisStatusLabel);
             this.screwStatusCard.Controls.Add(this.screwTitleLabel);
             this.screwStatusCard.Location = new System.Drawing.Point(480, 10);
             this.screwStatusCard.Name = "screwStatusCard";
             this.screwStatusCard.Size = new System.Drawing.Size(230, 100);
             this.screwStatusCard.TabIndex = 2;
             // 
-            // screwIndicator
+            // tighteningAxisIndicator
             // 
-            this.screwIndicator.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
-            this.screwIndicator.Location = new System.Drawing.Point(195, 20);
-            this.screwIndicator.Name = "screwIndicator";
-            this.screwIndicator.Size = new System.Drawing.Size(12, 12);
-            this.screwIndicator.TabIndex = 2;
+            this.tighteningAxisIndicator.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
+            this.tighteningAxisIndicator.Location = new System.Drawing.Point(195, 20);
+            this.tighteningAxisIndicator.Name = "tighteningAxisIndicator";
+            this.tighteningAxisIndicator.Size = new System.Drawing.Size(12, 12);
+            this.tighteningAxisIndicator.TabIndex = 2;
             // 
-            // screwStatusLabel
+            // tighteningAxisStatusLabel
             // 
-            this.screwStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10F);
-            this.screwStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
-            this.screwStatusLabel.Location = new System.Drawing.Point(15, 45);
-            this.screwStatusLabel.Name = "screwStatusLabel";
-            this.screwStatusLabel.Size = new System.Drawing.Size(150, 23);
-            this.screwStatusLabel.TabIndex = 1;
-            this.screwStatusLabel.Text = "已连接";
+            this.tighteningAxisStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10F);
+            this.tighteningAxisStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
+            this.tighteningAxisStatusLabel.Location = new System.Drawing.Point(15, 45);
+            this.tighteningAxisStatusLabel.Name = "tighteningAxisStatusLabel";
+            this.tighteningAxisStatusLabel.Size = new System.Drawing.Size(150, 23);
+            this.tighteningAxisStatusLabel.TabIndex = 1;
+            this.tighteningAxisStatusLabel.Text = "已连接";
             // 
             // screwTitleLabel
             // 
@@ -329,7 +329,7 @@
             this.screwTitleLabel.Name = "screwTitleLabel";
             this.screwTitleLabel.Size = new System.Drawing.Size(150, 23);
             this.screwTitleLabel.TabIndex = 0;
-            this.screwTitleLabel.Text = "螺丝机";
+            this.screwTitleLabel.Text = "拧紧轴";
             // 
             // scannerStatusCard
             // 
@@ -451,8 +451,8 @@
         private AntdUI.Label pcStatusLabel;
         private AntdUI.Label pcTitleLabel;
         private AntdUI.Panel screwStatusCard;
-        private AntdUI.Panel screwIndicator;
-        private AntdUI.Label screwStatusLabel;
+        private AntdUI.Panel tighteningAxisIndicator;
+        private AntdUI.Label tighteningAxisStatusLabel;
         private AntdUI.Label screwTitleLabel;
         private AntdUI.Panel scannerStatusCard;
         private AntdUI.Panel scannerIndicator;
