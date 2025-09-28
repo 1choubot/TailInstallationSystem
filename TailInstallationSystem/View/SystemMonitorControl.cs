@@ -95,7 +95,26 @@ namespace TailInstallationSystem.View
             try
             {
                 UpdateProgress(10);
+
+                // 先初始化设备连接
+                if (commManager != null)
+                {
+                    LogManager.LogInfo("开始初始化设备连接...");
+                    bool connectResult = await commManager.InitializeConnections();
+                    if (!connectResult)
+                    {
+                        MessageBox.Show("设备连接初始化失败，请检查设备状态", "错误",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        UpdateProgress(0);
+                        return;
+                    }
+                }
+
+                UpdateProgress(50);
+
+                // 然后启动系统
                 await controller.StartSystem();
+
                 btnStart.Enabled = false;
                 btnStop.Enabled = true;
                 UpdateProgress(100);
@@ -114,6 +133,7 @@ namespace TailInstallationSystem.View
             }
         }
 
+
         private async void btnStop_Click(object sender, EventArgs e)
         {
             try
@@ -122,7 +142,15 @@ namespace TailInstallationSystem.View
 
                 StopStatusMonitoring();
 
-                await controller.StopSystem();
+                // 添加null检查
+                if (controller != null)
+                {
+                    await controller.StopSystem();
+                }
+                else
+                {
+                    LogManager.LogWarning("控制器对象为空，跳过停止操作");
+                }
 
                 btnStart.Enabled = true;
                 btnStop.Enabled = false;
@@ -131,7 +159,7 @@ namespace TailInstallationSystem.View
                 // 重置设备状态...
                 UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
-                UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected); 
+                UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
 
                 currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
@@ -143,8 +171,10 @@ namespace TailInstallationSystem.View
             {
                 MessageBox.Show($"停止失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 LogManager.LogError($"系统停止失败: {ex.Message}");
+                LogManager.LogError($"异常堆栈: {ex.StackTrace}");
             }
         }
+
 
         private void btnSettings_Click(object sender, EventArgs e)
         {

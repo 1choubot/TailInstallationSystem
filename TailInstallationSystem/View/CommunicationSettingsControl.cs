@@ -210,7 +210,8 @@ namespace TailInstallationSystem
 
                 LogManager.LogInfo($"测试PC通讯连接: {ip}:{port}");
 
-                bool success = await TestTcpConnection(ip, port, "PC");
+                // 检查PC配置模式 - 默认是服务端模式
+                bool success = await TestPCServerMode(port);
 
                 if (success)
                 {
@@ -234,6 +235,87 @@ namespace TailInstallationSystem
             }
         }
 
+        /// <summary>
+        /// 测试PC服务端模式 - 检查端口是否可用
+        /// </summary>
+        private async Task<bool> TestPCServerMode(int port)
+        {
+            TcpListener testListener = null;
+            TcpClient testClient = null;
+            
+            try
+            {
+                LogManager.LogInfo($"测试PC服务端模式，端口: {port}");
+                
+                // 1. 尝试启动服务端
+                testListener = new TcpListener(IPAddress.Any, port);
+                testListener.Start();
+                LogManager.LogInfo($"PC服务端启动成功，端口: {port}");
+                
+                // 2. 尝试客户端连接测试
+                testClient = new TcpClient();
+                var connectTask = testClient.ConnectAsync("127.0.0.1", port);
+                var timeoutTask = Task.Delay(3000);
+                var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+                
+                if (completedTask == connectTask && !connectTask.IsFaulted && testClient.Connected)
+                {
+                    LogManager.LogInfo("PC服务端连接测试成功 - 可以正常接受客户端连接");
+                    return true;
+                }
+                else
+                {
+                    LogManager.LogWarning("PC服务端连接测试失败 - 无法接受客户端连接");
+                    return false;
+                }
+            }
+            catch (SocketException ex)
+            {
+                if (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+                {
+                    // 端口被占用，需要进一步检查是否是系统占用
+                    LogManager.LogWarning($"PC服务端端口 {port} 已被占用");
+                    
+                    // 尝试连接到已存在的服务端
+                    try
+                    {
+                        testClient = new TcpClient();
+                        await testClient.ConnectAsync("127.0.0.1", port);
+                        if (testClient.Connected)
+                        {
+                            LogManager.LogInfo("端口已被占用，但可以正常连接 - 可能系统已在运行");
+                            return true;
+                        }
+                    }
+                    catch
+                    {
+                        LogManager.LogError("端口被占用且无法连接 - 可能被其他程序占用");
+                        return false;
+                    }
+                }
+                
+                LogManager.LogError($"PC服务端端口测试失败: {ex.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"PC服务端模式测试异常: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    testClient?.Close();
+                    testListener?.Stop();
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogWarning($"清理测试资源时异常: {ex.Message}");
+                }
+            }
+        }
+
         #endregion
 
         #region 连接测试方法
@@ -247,10 +329,20 @@ namespace TailInstallationSystem
 
                 if (connectResult.IsSuccess)
                 {
-                    // 尝试读取一个地址测试连接
-                    var readResult = await Task.Run(() => modbusTcpClient.ReadBool("M100"));
+                    string testAddress = _config.PLC.TriggerAddress.Replace("D", "");
+                    var readResult = await Task.Run(() => modbusTcpClient.ReadInt16(testAddress, 1));
                     modbusTcpClient.ConnectClose();
-                    return readResult.IsSuccess;
+                    
+                    if (readResult.IsSuccess)
+                    {
+                        LogManager.LogInfo($"PLC测试成功，寄存器100值: {readResult.Content[0]}");
+                        return true;
+                    }
+                    else
+                    {
+                        LogManager.LogError($"PLC读取失败: {readResult.Message}");
+                        return false;
+                    }
                 }
                 return false;
             }
@@ -271,7 +363,7 @@ namespace TailInstallationSystem
                 if (connectResult.IsSuccess)
                 {
                     // 尝试读取拧紧轴的运行状态寄存器来测试连接
-                    var readResult = await Task.Run(() => modbusTcpClient.ReadFloat("5100", 1));
+                    var readResult = await Task.Run(() => modbusTcpClient.ReadInt16("5100", 1));
                     modbusTcpClient.ConnectClose();
 
                     if (readResult.IsSuccess)

@@ -8,6 +8,7 @@ namespace TailInstallationSystem
     /// </summary>
     public class TighteningAxisData
     {
+        private static int _lastControlCommand = 0;
         #region 基本属性
 
         /// <summary>
@@ -66,6 +67,11 @@ namespace TailInstallationSystem
         /// </summary>
         public float UpperLimitTorque { get; set; }
 
+        /// <summary>
+        /// 实时角度 (地址5098)
+        /// </summary>
+        public float RealtimeAngle { get; set; }
+
         #endregion
 
         #region 统计数据
@@ -92,12 +98,33 @@ namespace TailInstallationSystem
         {
             get
             {
-                // 控制命令字为0表示运行完成
-                if (ControlCommand == 0)
+                // 记录控制命令变化
+                bool commandChanged = _lastControlCommand == 100 && ControlCommand == 0;
+                if (ControlCommand != _lastControlCommand)
                 {
-                    // 进一步检查运行状态
-                    return Status != TighteningStatus.Running && Status != TighteningStatus.Idle;
+                    LogManager.LogDebug($"控制命令字变化: {_lastControlCommand} → {ControlCommand}");
+                    _lastControlCommand = ControlCommand;
                 }
+
+                // 方案1：检测从100变为0（最可靠）
+                if (commandChanged)
+                {
+                    LogManager.LogInfo("检测到拧紧操作完成（控制命令字100→0）");
+                    return true;
+                }
+
+                // 方案2：控制命令为0且有明确的结果状态
+                if (ControlCommand == 0 && RunningStatusCode >= 10)
+                {
+                    return true;
+                }
+
+                // 方案3：控制命令为0且有完成扭矩
+                if (ControlCommand == 0 && CompletedTorque > 0.01f) // 避免浮点数精度问题
+                {
+                    return true;
+                }
+
                 return false;
             }
         }

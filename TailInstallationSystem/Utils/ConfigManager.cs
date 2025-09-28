@@ -60,6 +60,10 @@ namespace TailInstallationSystem.Utils
                             }
                         }
                         _currentConfig = config;
+                        
+                        // 🔧 新增：应用日志设置
+                        ApplyLoggingSettings(config);
+                        
                         LogManager.LogInfo("配置文件加载成功");
                     }
                     else
@@ -116,6 +120,10 @@ namespace TailInstallationSystem.Utils
                 var json = JsonConvert.SerializeObject(config, Formatting.Indented);
                 File.WriteAllText(ConfigFile, json);
                 _currentConfig = config;
+                
+                // 🔧 新增：应用日志设置
+                ApplyLoggingSettings(config);
+                
                 LogManager.LogInfo("配置文件保存成功");
                 try
                 {
@@ -130,6 +138,23 @@ namespace TailInstallationSystem.Utils
             {
                 LogManager.LogError($"保存配置文件失败: {ex.Message}");
                 throw;
+            }
+        }
+
+        // 🔧 新增：应用日志设置到LogManager
+        private static void ApplyLoggingSettings(CommunicationConfig config)
+        {
+            try
+            {
+                if (config?.System?.LogLevel != null)
+                {
+                    LogManager.SetLogLevel(config.System.LogLevel);
+                    LogManager.LogInfo($"已应用日志级别: {config.System.LogLevel}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"应用日志设置失败: {ex.Message}");
             }
         }
 
@@ -192,6 +217,7 @@ namespace TailInstallationSystem.Utils
             }
         }
 
+        // 🔧 修改：确保Logging配置存在
         private static void EnsureSystemSettingsExists(CommunicationConfig config)
         {
             if (config.System == null)
@@ -199,8 +225,16 @@ namespace TailInstallationSystem.Utils
                 config.System = new SystemSettings();
                 LogManager.LogInfo("自动添加了系统设置部分到配置中");
             }
+            
+            // 🔧 新增：确保Logging配置存在
+            if (config.System.Logging == null)
+            {
+                config.System.Logging = new LoggingSettings();
+                LogManager.LogInfo("自动添加了日志配置部分到配置中");
+            }
         }
 
+        // 🔧 修改：创建包含完整日志配置的默认配置
         private static CommunicationConfig CreateDefaultConfig()
         {
             return new CommunicationConfig
@@ -210,8 +244,28 @@ namespace TailInstallationSystem.Utils
                 TighteningAxis = new TighteningAxisConfig(), 
                 PC = new PCConfig(),
                 Server = new ServerConfig(),
-                System = new SystemSettings()
+                System = new SystemSettings() // 这里会自动使用CommunicationConfig.cs中定义的默认值
             };
+        }
+
+        // 🔧 新增：强制重新生成配置文件（保留现有设置）
+        public static void RegenerateConfigWithNewFields()
+        {
+            try
+            {
+                LogManager.LogInfo("开始更新配置文件以包含新字段...");
+                
+                var config = GetCurrentConfig();
+                EnsureSystemSettingsExists(config); // 这会添加缺失的Logging字段
+                SaveConfig(config); // 保存更新后的配置
+                
+                LogManager.LogInfo("配置文件已更新，包含所有新字段");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"更新配置文件失败: {ex.Message}");
+                throw;
+            }
         }
     }
 }

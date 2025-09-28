@@ -2,6 +2,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using TailInstallationSystem.Utils;
 
@@ -28,31 +29,40 @@ namespace TailInstallationSystem
 
             if (isLicenseValid)
             {
-                InitializeCommunication();
+                // 只创建通讯管理器，不初始化连接
+                var config = ConfigManager.LoadConfig();
+                commManager = new CommunicationManager(config);
+
+                // 添加事件订阅
+                commManager.OnDeviceConnectionChanged += OnDeviceConnectionChanged;
+                commManager.OnDataReceived += OnDataReceived;
+                commManager.OnBarcodeScanned += OnBarcodeScanned;
+                commManager.OnTighteningDataReceived += OnTighteningDataReceived;
+                commManager.OnPLCTrigger += OnPLCTrigger;
+
+                // 创建控制器
+                controller = new TailInstallationController(commManager);
+
                 ShowSystemMonitor();
                 UpdateMenuButtonState(btnSystemMonitor);
             }
             else
             {
-                // 如果授权失败，关闭程序
                 this.Load += (s, e) => {
                     MessageBox.Show("授权验证失败，程序将退出", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     Application.Exit();
                 };
             }
-
-            //InitializeCommunication();
-            //// 启动时默认显示系统监控界面
-            //ShowSystemMonitor();
-            //UpdateMenuButtonState(btnSystemMonitor);
         }
+
+
 
         private void InitializeEvents()
         {
             // 菜单按钮事件已在设计器中绑定
         }
 
-        private void InitializeCommunication()
+        private async Task InitializeCommunication()
         {
             try
             {
@@ -69,8 +79,17 @@ namespace TailInstallationSystem
                 commManager.OnDeviceConnectionChanged += OnDeviceConnectionChanged;
                 commManager.OnDataReceived += OnDataReceived;
                 commManager.OnBarcodeScanned += OnBarcodeScanned;
-                commManager.OnTighteningDataReceived += OnTighteningDataReceived; 
+                commManager.OnTighteningDataReceived += OnTighteningDataReceived;
                 commManager.OnPLCTrigger += OnPLCTrigger;
+
+                // 【重要】初始化所有设备连接
+                bool connectResult = await commManager.InitializeConnections();
+                if (!connectResult)
+                {
+                    LogManager.LogError("设备连接初始化失败");
+                    MessageBox.Show("设备连接初始化失败，请检查设备连接状态", "警告",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
 
                 controller = new TailInstallationController(commManager);
 
@@ -79,6 +98,8 @@ namespace TailInstallationSystem
             catch (Exception ex)
             {
                 LogManager.LogError($"初始化通讯管理器失败: {ex.Message}");
+                MessageBox.Show($"初始化失败: {ex.Message}", "错误",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -300,10 +321,10 @@ namespace TailInstallationSystem
 
         #region 事件处理
 
-        private void OnCommunicationSettingsChanged(object sender, EventArgs e)
+        private async void OnCommunicationSettingsChanged(object sender, EventArgs e)
         {
             // 配置变更后重新初始化通讯管理器
-            InitializeCommunication();
+            await InitializeCommunication(); // 现在可以await了
             LogManager.LogInfo("通讯配置已更新，重新初始化通讯管理器");
 
             // 重新创建监控界面以使用新的通讯管理器

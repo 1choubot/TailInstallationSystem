@@ -12,15 +12,12 @@ namespace TailInstallationSystem
         // 当前日志级别配置
         private static LogLevel _currentLogLevel = LogLevel.Info; // 默认级别
 
-        // 日志级别优先级映射
-        private static readonly int[] LogLevelPriority = { 3, 2, 1, 0 }; // Info=3, Warning=2, Error=1, Debug=0
-
         public enum LogLevel
         {
             Debug = 0,    // Debug 级别最低
-            Error = 1,    // Error 级别最高
-            Warning = 2,  // Warning 级别中等
-            Info = 3      // Info 级别普通
+            Info = 1,     // Info 级别
+            Warning = 2,  // Warning 级别
+            Error = 3     // Error 级别最高
         }
 
         static LogManager()
@@ -66,11 +63,13 @@ namespace TailInstallationSystem
             return _currentLogLevel;
         }
 
-        // ：检查是否应该记录某个级别的日志
+        // 检查是否应该记录某个级别的日志
         private static bool ShouldLog(LogLevel level)
         {
             // 只记录级别 >= 当前设置级别的日志
-            return (int)level <= (int)_currentLogLevel;
+            // Debug=0, Info=1, Warning=2, Error=3
+            // 当前级别为Info(1)时，只记录Info(1)、Warning(2)、Error(3)
+            return (int)level >= (int)_currentLogLevel;
         }
 
         public static void LogInfo(string message)
