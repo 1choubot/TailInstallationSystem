@@ -18,11 +18,7 @@ namespace TailInstallationSystem
         private readonly ConcurrentQueue<string> receivedProcessData = new ConcurrentQueue<string>();
         private const int MAX_PROCESS_DATA_COUNT = 10; // 添加队列大小限制
         private readonly object processDataLock = new object();
-        private DateTime _lastTighteningLogTime = DateTime.MinValue;
-        private string _lastTighteningLogMessage = "";
-        private int _duplicateLogCount = 0;
-        private readonly TimeSpan _logSuppressionInterval = TimeSpan.FromSeconds(5);
-
+       
         // 简化状态管理
         private bool isRunning = false;
         private readonly object runningStateLock = new object();
@@ -362,29 +358,16 @@ namespace TailInstallationSystem
                     latestTighteningData = tighteningData;
                 }
 
-                // 🔧 改进：更精确的状态消息生成
-                string currentMessage = GenerateStatusMessage(tighteningData);
-
-                // 检查是否需要记录日志
-                bool shouldLog = ShouldLogTighteningMessage(currentMessage);
-
-                // 🔧 改进：合并重复的日志逻辑
+                // 🔧 这里作为主要的日志输出点，保持原有逻辑
                 if (tighteningData.IsOperationCompleted)
                 {
-                    // 操作完成时总是记录，但要重置去重
-                    LogManager.LogInfo($"拧紧操作完成 - 完成扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
-                    ResetLogSuppression();
+                    LogManager.LogInfo($"拧紧操作完成 - 扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
                 }
-                else if (tighteningData.IsRunning && shouldLog)
+                else if (tighteningData.IsRunning)
                 {
                     LogManager.LogInfo($"拧紧轴运行中 - 实时扭矩: {tighteningData.RealtimeTorque:F2}Nm, 目标: {tighteningData.TargetTorque:F2}Nm");
                 }
-                else if (shouldLog && tighteningData.CompletedTorque > 0.01f)
-                {
-                    LogManager.LogInfo(currentMessage);
-                }
 
-                // 错误日志总是记录
                 if (tighteningData.HasError)
                 {
                     LogManager.LogError($"拧紧轴错误 - 错误代码: {tighteningData.ErrorCode}, 状态: {tighteningData.GetStatusDisplayName()}");
@@ -394,61 +377,6 @@ namespace TailInstallationSystem
             {
                 LogManager.LogError($"处理拧紧轴数据异常: {ex.Message}");
             }
-        }
-
-        // 新增：更精确的状态消息生成
-        private string GenerateStatusMessage(TighteningAxisData tighteningData)
-        {
-            if (tighteningData.IsOperationCompleted)
-            {
-                return $"拧紧操作完成 - 扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}";
-            }
-            else if (tighteningData.IsRunning)
-            {
-                return $"拧紧轴运行中 - 实时扭矩: {tighteningData.RealtimeTorque:F2}Nm";
-            }
-            else
-            {
-                return $"拧紧轴状态: {tighteningData.GetStatusDisplayName()}, 扭矩: {tighteningData.CompletedTorque:F2}Nm";
-            }
-        }
-
-        private bool ShouldLogTighteningMessage(string message)
-        {
-            var now = DateTime.Now;
-
-            // 如果消息不同，总是记录
-            if (message != _lastTighteningLogMessage)
-            {
-                _lastTighteningLogMessage = message;
-                _lastTighteningLogTime = now;
-                _duplicateLogCount = 0;
-                return true;
-            }
-
-            // 如果消息相同，检查时间间隔和重复次数
-            if (now - _lastTighteningLogTime > _logSuppressionInterval)
-            {
-                _lastTighteningLogTime = now;
-                _duplicateLogCount++;
-
-                // 每5次重复后记录一次汇总
-                if (_duplicateLogCount % 5 == 0)
-                {
-                    LogManager.LogInfo($"拧紧轴状态重复 {_duplicateLogCount} 次: {message}");
-                    return false; // 记录了汇总，本次不记录
-                }
-
-                return _duplicateLogCount <= 3; // 前3次重复仍然记录
-            }
-
-            return false; // 抑制重复日志
-        }
-
-        private void ResetLogSuppression()
-        {
-            _lastTighteningLogMessage = "";
-            _duplicateLogCount = 0;
         }
 
         private bool ValidateProcessData()
@@ -514,6 +442,7 @@ namespace TailInstallationSystem
 
         private async Task ExecuteTailInstallation()
         {
+            var startTime = DateTime.Now;
             try
             {
                 // 验证工序数据完整性
@@ -521,30 +450,22 @@ namespace TailInstallationSystem
                 {
                     LogManager.LogWarning("工序数据验证失败，无法执行尾椎安装");
                     OnProcessStatusChanged?.Invoke("", "工序数据不完整或无效");
-
-                    // 通知PLC数据异常
-                    await commManager.WritePLCDRegister("D522", 1); // 假设D522为错误标志
+                    await commManager.WritePLCDRegister("D522", 1);
                     return;
                 }
+
                 LogManager.LogInfo("开始执行尾椎安装工序");
                 OnProcessStatusChanged?.Invoke("", "开始执行尾椎安装");
-                // 步骤1：发送扫码指令
-                OnProcessStatusChanged?.Invoke("", "发送扫码指令");
-                bool scanCommandSent = await commManager.SendScannerCommand("ON");
-                if (!scanCommandSent)
-                {
-                    LogManager.LogError("发送扫码指令失败");
-                    OnProcessStatusChanged?.Invoke("", "扫码枪通信失败");
-                    return;
-                }
-                // 步骤2：等待条码扫描
-                OnProcessStatusChanged?.Invoke("", "等待条码扫描");
-                string barcode = await WaitForBarcodeScan();
+
+                // 修改：持续扫码直到成功
+                string barcode = await WaitForBarcodeScanWithRetry();
+
                 // 验证条码
                 if (string.IsNullOrWhiteSpace(barcode))
                 {
                     throw new InvalidOperationException("扫描到的条码为空");
                 }
+
                 OnCurrentProductChanged?.Invoke(barcode, "条码扫描完成");
                 // 步骤3：通知PLC扫码完成
                 LogManager.LogInfo($"通知PLC扫码完成 - D521=1, D501=0");
@@ -597,6 +518,17 @@ namespace TailInstallationSystem
                     }
                     LogManager.LogInfo("尾椎安装工序完成");
                     OnProcessStatusChanged?.Invoke(barcode, "尾椎安装完成");
+
+                    var endTime = DateTime.Now;
+                    var duration = (endTime - startTime).TotalSeconds;
+
+                    LogManager.LogInfo("========== 尾椎安装流程完成 ==========");
+                    LogManager.LogInfo($"产品条码: {barcode}");
+                    LogManager.LogInfo($"总耗时: {duration:F1} 秒");
+                    LogManager.LogInfo($"拧紧结果: {(tighteningResult.Success ? "合格" : "不合格")} - {tighteningResult.QualityResult}");
+                    LogManager.LogInfo($"完成扭矩: {tighteningResult.Torque:F2}Nm (目标: {tighteningResult.TargetTorque:F2}Nm)");
+                    LogManager.LogInfo($"数据上传: {(uploadSuccess ? "成功" : "失败，已加入重试队列")}");
+                    LogManager.LogInfo("=====================================");
                 }
                 finally
                 {
@@ -626,6 +558,150 @@ namespace TailInstallationSystem
             finally
             {
                 OnProcessStatusChanged?.Invoke("", "等待下一个产品");
+            }
+        }
+
+        /// <summary>
+        /// 持续发送"ON"指令直到扫码成功
+        /// </summary>
+        private async Task<string> WaitForBarcodeScanWithRetry()
+        {
+            LogManager.LogInfo("开始持续扫码流程...");
+
+            int retryCount = 0;
+            const int maxRetries = 60; // 最大重试次数（避免无限循环）
+            const int scanInterval = 5000; // 每5秒重试一次
+
+            while (retryCount < maxRetries && GetRunningState() && !cancellationTokenSource.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    retryCount++;
+
+                    // 步骤1：发送扫码指令
+                    OnProcessStatusChanged?.Invoke("", $"发送扫码指令 (第{retryCount}次)");
+                    LogManager.LogInfo($"发送扫码指令 - 第{retryCount}次尝试");
+
+                    bool scanCommandSent = await commManager.SendScannerCommand("ON");
+                    if (!scanCommandSent)
+                    {
+                        LogManager.LogWarning($"第{retryCount}次扫码指令发送失败，等待{scanInterval / 1000}秒后重试");
+                        OnProcessStatusChanged?.Invoke("", $"扫码枪通信失败，{scanInterval / 1000}秒后重试");
+
+                        // 等待后继续重试
+                        await Task.Delay(scanInterval, cancellationTokenSource.Token);
+                        continue;
+                    }
+
+                    // 步骤2：等待条码扫描（较短超时）
+                    OnProcessStatusChanged?.Invoke("", $"等待条码扫描... (第{retryCount}次)");
+
+                    try
+                    {
+                        string barcode = await WaitForBarcodeScanSingle(scanInterval); // 5秒超时
+
+                        if (!string.IsNullOrWhiteSpace(barcode))
+                        {
+                            LogManager.LogInfo($"扫码成功！条码: {barcode} (第{retryCount}次尝试)");
+                            OnProcessStatusChanged?.Invoke("", "条码扫描成功");
+                            return barcode;
+                        }
+                    }
+                    catch (TimeoutException)
+                    {
+                        LogManager.LogInfo($"第{retryCount}次扫码超时，继续重试...");
+                        OnProcessStatusChanged?.Invoke("", $"扫码超时，{scanInterval / 1000}秒后重试 (第{retryCount}/{maxRetries}次)");
+                    }
+
+                    // 检查系统是否被取消
+                    if (cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        LogManager.LogInfo("扫码流程被取消");
+                        throw new OperationCanceledException("扫码流程被用户取消");
+                    }
+
+                    // 短暂等待后继续下一次尝试
+                    await Task.Delay(1000, cancellationTokenSource.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    LogManager.LogInfo("扫码重试流程被取消");
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"第{retryCount}次扫码尝试异常: {ex.Message}");
+
+                    // 异常情况下也要等待一段时间
+                    await Task.Delay(2000, cancellationTokenSource.Token);
+                }
+            }
+
+            // 达到最大重试次数
+            LogManager.LogError($"扫码重试达到最大次数 ({maxRetries})，放弃扫码");
+            OnProcessStatusChanged?.Invoke("", $"扫码失败，已重试{maxRetries}次");
+            throw new TimeoutException($"扫码重试达到最大次数 ({maxRetries})");
+        }
+
+        /// <summary>
+        /// 单次扫码等待（短超时）
+        /// </summary>
+        private async Task<string> WaitForBarcodeScanSingle(int timeoutMs = 5000)
+        {
+            lock (barcodeLock)
+            {
+                // 检查是否有缓存的条码
+                if (!string.IsNullOrEmpty(cachedBarcode))
+                {
+                    LogManager.LogInfo($"使用缓存的条码: {cachedBarcode}");
+                    string result = cachedBarcode;
+                    cachedBarcode = null; // 清空缓存
+                    return result;
+                }
+            }
+
+            // 创建等待任务
+            TaskCompletionSource<string> waitTask;
+            lock (barcodeTaskLock)
+            {
+                barcodeWaitTask = new TaskCompletionSource<string>();
+                waitTask = barcodeWaitTask;
+            }
+
+            try
+            {
+                // 设置较短的超时时间
+                using (var timeoutCts = new CancellationTokenSource(timeoutMs))
+                using (var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    timeoutCts.Token, cancellationTokenSource.Token))
+                {
+                    var timeoutTask = Task.Delay(timeoutMs, combinedCts.Token);
+                    var completedTask = await Task.WhenAny(waitTask.Task, timeoutTask);
+
+                    if (completedTask == waitTask.Task && !waitTask.Task.IsCanceled)
+                    {
+                        return waitTask.Task.Result;
+                    }
+                    else
+                    {
+                        // 不记录错误，因为这是正常的重试机制
+                        throw new TimeoutException($"单次扫码超时 ({timeoutMs}ms)");
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            finally
+            {
+                lock (barcodeTaskLock)
+                {
+                    if (barcodeWaitTask == waitTask)
+                    {
+                        barcodeWaitTask = null;
+                    }
+                }
             }
         }
 
@@ -898,6 +974,40 @@ namespace TailInstallationSystem
                 LogManager.LogError($"紧急停止异常: {ex.Message}");
             }
         }
+
+        public void UpdateCommunicationManager(CommunicationManager newCommManager)
+        {
+            try
+            {
+                LogManager.LogInfo("更新控制器的通讯管理器引用");
+
+                // 解绑旧事件
+                if (commManager != null)
+                {
+                    commManager.OnDataReceived -= ProcessReceivedData;
+                    commManager.OnBarcodeScanned -= ProcessBarcodeData;
+                    commManager.OnTighteningDataReceived -= ProcessTighteningData;
+                }
+
+                // 更新引用
+                commManager = newCommManager;
+
+                // 绑定新事件
+                if (commManager != null)
+                {
+                    commManager.OnDataReceived += ProcessReceivedData;
+                    commManager.OnBarcodeScanned += ProcessBarcodeData;
+                    commManager.OnTighteningDataReceived += ProcessTighteningData;
+                }
+
+                LogManager.LogInfo("控制器通讯管理器更新完成");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"更新通讯管理器失败: {ex.Message}");
+            }
+        }
+
 
         // 拧紧结果类 
         public class TighteningResult

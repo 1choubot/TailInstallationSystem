@@ -167,6 +167,7 @@ namespace TailInstallationSystem
             if (systemMonitorControl == null)
             {
                 systemMonitorControl = new View.SystemMonitorControl(controller, commManager);
+                LogManager.LogInfo("系统监控界面已初始化");
             }
             SwitchUserControl(systemMonitorControl);
         }
@@ -277,9 +278,6 @@ namespace TailInstallationSystem
                 return;
             }
 
-            // 记录拧紧轴数据
-            LogManager.LogInfo($"主窗口收到拧紧轴数据: {tighteningData.GetStatusDescription()}");
-
             // 如果当前是系统监控界面，可以更新拧紧状态显示
             if (currentUserControl is View.SystemMonitorControl monitorControl)
             {
@@ -292,7 +290,6 @@ namespace TailInstallationSystem
                 {
                     // 操作完成，显示结果
                     string resultMessage = tighteningData.IsQualified ? "拧紧合格" : $"拧紧不合格: {tighteningData.QualityResult}";
-                    LogManager.LogInfo($"拧紧操作完成: {resultMessage}");
                 }
 
                 // 如果有错误，记录错误信息
@@ -321,21 +318,120 @@ namespace TailInstallationSystem
 
         #region 事件处理
 
-        private async void OnCommunicationSettingsChanged(object sender, EventArgs e)
+        private void OnCommunicationSettingsChanged(object sender, EventArgs e)
         {
-            // 配置变更后重新初始化通讯管理器
-            await InitializeCommunication(); // 现在可以await了
-            LogManager.LogInfo("通讯配置已更新，重新初始化通讯管理器");
-
-            // 重新创建监控界面以使用新的通讯管理器
-            systemMonitorControl?.Dispose();
-            systemMonitorControl = new View.SystemMonitorControl(controller, commManager);
-            if (currentUserControl is View.SystemMonitorControl)
+            try
             {
-                SwitchUserControl(systemMonitorControl);
+                LogManager.LogInfo("通讯配置已变更，准备更新...");
+
+                // 检查系统是否正在运行
+                bool systemRunning = controller != null && btnStop.Enabled;
+
+                if (systemRunning)
+                {
+                    // 如果系统正在运行，提示用户
+                    var result = MessageBox.Show(
+                        "配置已保存。系统正在运行中，是否立即重启系统以应用新配置？\n\n" +
+                        "选择\"是\"将停止并重启系统。\n" +
+                        "选择\"否\"将在下次启动时应用新配置。",
+                        "配置更新提示",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+
+                    if (result == DialogResult.Yes)
+                    {
+                        // 先停止系统
+                        _ = Task.Run(async () =>
+                        {
+                            await controller.StopSystem();
+
+                            // 在UI线程更新
+                            this.Invoke(new Action(() =>
+                            {
+                                UpdateConfigurationOnly();
+                                MessageBox.Show("配置已更新。请手动点击\"启动系统\"按钮重新启动。",
+                                              "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            }));
+                        });
+                    }
+                    else
+                    {
+                        LogManager.LogInfo("配置已保存，将在下次系统启动时生效");
+                    }
+                }
+                else
+                {
+                    // 系统未运行，直接更新配置
+                    UpdateConfigurationOnly();
+                    MessageBox.Show("配置已保存，将在启动系统时生效。",
+                                  "配置保存成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"配置更新失败: {ex.Message}");
+                MessageBox.Show($"配置更新失败: {ex.Message}", "错误",
+                               MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
+        private void UpdateConfigurationOnly()
+        {
+            try
+            {
+                // 重新加载配置
+                var newConfig = ConfigManager.LoadConfig();
+
+                // 释放旧的通讯管理器（如果存在）
+                if (commManager != null)
+                {
+                    // 先解绑事件
+                    commManager.OnDeviceConnectionChanged -= OnDeviceConnectionChanged;
+                    commManager.OnDataReceived -= OnDataReceived;
+                    commManager.OnBarcodeScanned -= OnBarcodeScanned;
+                    commManager.OnTighteningDataReceived -= OnTighteningDataReceived;
+                    commManager.OnPLCTrigger -= OnPLCTrigger;
+
+                    // 释放资源
+                    commManager.Dispose();
+                }
+
+                // 创建新的通讯管理器（但不初始化连接）
+                commManager = new CommunicationManager(newConfig);
+
+                // 重新绑定事件
+                commManager.OnDeviceConnectionChanged += OnDeviceConnectionChanged;
+                commManager.OnDataReceived += OnDataReceived;
+                commManager.OnBarcodeScanned += OnBarcodeScanned;
+                commManager.OnTighteningDataReceived += OnTighteningDataReceived;
+                commManager.OnPLCTrigger += OnPLCTrigger;
+
+                // 更新控制器（如果存在）
+                if (controller != null)
+                {
+                    controller = new TailInstallationController(commManager);
+                }
+
+                // 更新监控界面（如果存在）
+                if (systemMonitorControl != null && currentUserControl is View.SystemMonitorControl)
+                {
+                    systemMonitorControl.Dispose();
+                    systemMonitorControl = new View.SystemMonitorControl(controller, commManager);
+                    SwitchUserControl(systemMonitorControl);
+                }
+
+                LogManager.LogInfo("配置已更新，等待系统启动");
+                LogManager.LogInfo("========== 配置更新完成 ==========");
+                LogManager.LogInfo($"当前系统状态: 待启动");
+                LogManager.LogInfo($"设备配置已加载，等待用户启动系统");
+                LogManager.LogInfo("==================================");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"更新配置时出错: {ex.Message}");
+                throw;
+            }
+        }
         #endregion
 
         protected override void OnFormClosing(FormClosingEventArgs e)

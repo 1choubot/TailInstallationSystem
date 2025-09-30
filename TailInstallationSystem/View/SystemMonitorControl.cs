@@ -309,9 +309,6 @@ namespace TailInstallationSystem.View
         {
             var status = isConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected;
             UpdateDeviceStatus(deviceName, status);
-
-            string statusText = isConnected ? "已连接" : "断开连接";
-            LogManager.LogInfo($"设备状态变化: {deviceName} {statusText}");
         }
 
         private void OnDataReceived(string data)
@@ -361,12 +358,12 @@ namespace TailInstallationSystem.View
                     if (tighteningData.IsRunning)
                     {
                         UpdateDeviceStatus("TighteningAxis", DeviceStatus.Working);
-                        LogManager.LogInfo($"拧紧轴运行中 - 实时扭矩: {tighteningData.RealtimeTorque:F2}Nm");
+                        //LogManager.LogInfo($"拧紧轴运行中 - 实时扭矩: {tighteningData.RealtimeTorque:F2}Nm");
                     }
                     else if (tighteningData.IsOperationCompleted)
                     {
                         UpdateDeviceStatus("TighteningAxis", DeviceStatus.Connected);
-                        LogManager.LogInfo($"拧紧操作完成 - 完成扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
+                        //LogManager.LogInfo($"拧紧操作完成 - 完成扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
                     }
                     else
                     {

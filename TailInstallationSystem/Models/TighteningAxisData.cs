@@ -9,6 +9,7 @@ namespace TailInstallationSystem
     public class TighteningAxisData
     {
         private static int _lastControlCommand = 0;
+        private static bool _hasReportedCompletion = false;
         #region 基本属性
 
         /// <summary>

@@ -26,7 +26,9 @@ namespace TailInstallationSystem
         private bool _disposed = false;
         private readonly object _disposeLock = new object();
         private int heartbeatLogCounter = 0;
-        
+        private bool _lastOperationCompleted = false;
+        private static bool _lastCompletionLogged = false;
+
 
         // 拧紧轴轮询状态追踪
         private int _pollCount = 0;
@@ -67,6 +69,10 @@ namespace TailInstallationSystem
         private bool isStatusPolling = false;
         private readonly object tighteningAxisLock = new object();
 
+        //记录是否首次创建和上次配置
+        private static bool _firstInstanceCreated = false;
+        private static string _lastConfigSummary = "";
+
         #endregion
 
         #region 事件
@@ -81,27 +87,94 @@ namespace TailInstallationSystem
 
         #region 构造函数和初始化
 
+        // 替换整个构造函数：
         public CommunicationManager(CommunicationConfig config = null)
         {
             _config = config ?? ConfigManager.LoadConfig();
             _cancellationTokenSource = new CancellationTokenSource();
-            
-            LogManager.LogInfo($"通讯管理器初始化:");
-            LogManager.LogInfo($"  - PLC: {_config.PLC.IP}:{_config.PLC.Port}");
-            LogManager.LogInfo($"  - PC: {_config.PC.IP}:{_config.PC.Port} (服务端模式: {_config.PC.IsServer})");
-            LogManager.LogInfo($"  - 扫码枪: {_config.Scanner.IP}:{_config.Scanner.Port}");
-            LogManager.LogInfo($"  - 拧紧轴: {_config.TighteningAxis.IP}:{_config.TighteningAxis.Port}");
-            
-            
-            LogManager.LogInfo($"  - PLC触发地址: {_config.PLC.StartSignalAddress}");
-            LogManager.LogInfo($"  - PLC确认地址: {_config.PLC.ConfirmSignalAddress}");
+
+            // 生成配置摘要
+            var configSummary = $"PLC:{_config.PLC.IP}:{_config.PLC.Port}|" +
+                               $"PC:{_config.PC.IP}:{_config.PC.Port}|" +
+                               $"Scanner:{_config.Scanner.IP}:{_config.Scanner.Port}|" +
+                               $"TighteningAxis:{_config.TighteningAxis.IP}:{_config.TighteningAxis.Port}";
+
+            // 判断是否需要输出详细信息
+            if (!_firstInstanceCreated)
+            {
+                // 首次创建，输出完整信息
+                LogManager.LogInfo($"通讯管理器初始化:");
+                LogManager.LogInfo($"  - PLC: {_config.PLC.IP}:{_config.PLC.Port}");
+                LogManager.LogInfo($"  - PC: {_config.PC.IP}:{_config.PC.Port} (服务端模式: {_config.PC.IsServer})");
+                LogManager.LogInfo($"  - 扫码枪: {_config.Scanner.IP}:{_config.Scanner.Port}");
+                LogManager.LogInfo($"  - 拧紧轴: {_config.TighteningAxis.IP}:{_config.TighteningAxis.Port}");
+                LogManager.LogInfo($"  - PLC触发地址: {_config.PLC.StartSignalAddress}");
+                LogManager.LogInfo($"  - PLC确认地址: {_config.PLC.ConfirmSignalAddress}");
+
+                _firstInstanceCreated = true;
+                _lastConfigSummary = configSummary;
+            }
+            else if (configSummary != _lastConfigSummary)
+            {
+                // 配置有变化，输出变化的内容
+                LogManager.LogInfo($"通讯管理器配置已更新:");
+                CompareAndLogChanges(_lastConfigSummary, configSummary);
+                _lastConfigSummary = configSummary;
+            }
+            else
+            {
+                // 配置未变化，只输出简单信息
+                LogManager.LogInfo("通讯管理器重新创建（配置未变化）");
+            }
         }
 
-        public async Task<bool> InitializeConnections()
+        private void CompareAndLogChanges(string oldSummary, string newSummary)
         {
             try
             {
-                LogManager.LogInfo("开始初始化设备连接...");
+                // 解析旧配置
+                var oldParts = new Dictionary<string, string>();
+                foreach (var part in oldSummary.Split('|'))
+                {
+                    var keyValue = part.Split(':');
+                    if (keyValue.Length >= 2)
+                    {
+                        oldParts[keyValue[0]] = string.Join(":", keyValue.Skip(1));
+                    }
+                }
+
+                // 解析新配置
+                var newParts = new Dictionary<string, string>();
+                foreach (var part in newSummary.Split('|'))
+                {
+                    var keyValue = part.Split(':');
+                    if (keyValue.Length >= 2)
+                    {
+                        newParts[keyValue[0]] = string.Join(":", keyValue.Skip(1));
+                    }
+                }
+
+                // 比较并输出变化
+                foreach (var kvp in newParts)
+                {
+                    if (!oldParts.ContainsKey(kvp.Key) || oldParts[kvp.Key] != kvp.Value)
+                    {
+                        LogManager.LogInfo($"  - {kvp.Key} 更新为: {kvp.Value}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"比较配置变化时出错: {ex.Message}");
+            }
+        }
+
+
+        public async Task<bool> InitializeConnections(bool startPolling = true)
+        {
+            try
+            {
+                LogManager.LogInfo($"开始初始化设备连接... (启动轮询: {startPolling})");
                 // 重新创建取消令牌
                 _cancellationTokenSource?.Dispose();
                 _cancellationTokenSource = new CancellationTokenSource();
@@ -119,7 +192,7 @@ namespace TailInstallationSystem
                 OnDeviceConnectionChanged?.Invoke("Scanner", scannerResult);
 
                 // 初始化拧紧轴连接
-                bool tighteningAxisResult = await InitializeTighteningAxisConnection();
+                bool tighteningAxisResult = await InitializeTighteningAxisConnection(startPolling);
                 OnDeviceConnectionChanged?.Invoke("TighteningAxis", tighteningAxisResult);
 
                 LogManager.LogInfo($"设备连接初始化完成 - PLC:{plcResult}, PC:{pcResult}, 扫码枪:{scannerResult}, 拧紧轴:{tighteningAxisResult}");
@@ -135,7 +208,7 @@ namespace TailInstallationSystem
 
         #region 拧紧轴通讯 
 
-        private async Task<bool> InitializeTighteningAxisConnection()
+        private async Task<bool> InitializeTighteningAxisConnection(bool startPolling = true)
         {
             try
             {
@@ -165,10 +238,15 @@ namespace TailInstallationSystem
                     {
                         LogManager.LogError($"拧紧轴连接验证失败: {testRead.Message}");
                     }
-
-                    // 启动状态轮询
-                    StartStatusPolling();
-
+                    // 根据参数决定是否启动状态轮询
+                    if (startPolling)
+                    {
+                        StartStatusPolling();
+                    }
+                    else
+                    {
+                        LogManager.LogInfo("拧紧轴连接成功，但未启动状态轮询（测试模式）");
+                    }
                     return true;
                 }
                 else
@@ -376,65 +454,59 @@ namespace TailInstallationSystem
         private async Task PollTighteningAxisStatus()
         {
             _pollCount++;
-
             if (_pollCount % 50 == 1)
             {
                 LogManager.LogDebug($"拧紧轴轮询执行中，第{_pollCount}次");
             }
-
-            // 🔧 关键修改：添加多重安全检查
             if (!connectSuccess_TighteningAxis || !isStatusPolling || tighteningAxisClient == null)
-            {
-                if (_pollCount % 20 == 1)
-                {
-                    LogManager.LogDebug($"拧紧轴轮询条件不满足，准备退出");
-                }
                 return;
-            }
-
-            // 🔧 增加取消令牌检查
-            if (_pollingCts == null || _pollingCts.IsCancellationRequested)
-            {
-                LogManager.LogDebug("轮询取消令牌无效或已取消，退出轮询");
-                return;
-            }
-
             try
             {
                 var data = await ReadTighteningAxisData();
-
                 if (data != null)
                 {
                     bool statusChanged = false;
-
+                    bool isNewCompletion = false;  // 新增：是否是新的完成事件
+                                                   // 命令状态变化检测
                     if (data.ControlCommand != _lastCommandState)
                     {
                         LogManager.LogInfo($"拧紧轴控制命令变化: {_lastCommandState} → {data.ControlCommand}");
                         _lastCommandState = data.ControlCommand;
                         statusChanged = true;
                     }
-
+                    // 运行状态变化检测
                     if (data.RunningStatusCode != _lastRunningStatus)
                     {
                         LogManager.LogInfo($"拧紧轴运行状态变化: {_lastRunningStatus} → {data.RunningStatusCode} ({data.GetStatusDisplayName()})");
                         _lastRunningStatus = data.RunningStatusCode;
                         statusChanged = true;
                     }
-
-                    if (statusChanged || data.IsOperationCompleted)
+                    // 完成状态检测（只检测从false到true的变化）
+                    bool currentCompleted = data.IsOperationCompleted;
+                    if (currentCompleted && !_lastOperationCompleted)
+                    {
+                        isNewCompletion = true;
+                        // 只记录一次完成日志
+                        if (!_lastCompletionLogged)
+                        {
+                            LogManager.LogInfo($"拧紧操作完成 - 状态: {data.Status}, 扭矩: {data.CompletedTorque:F2}Nm, 结果: {(data.IsQualified ? "合格" : "不合格")}");
+                            _lastCompletionLogged = true;
+                        }
+                    }
+                    else if (!currentCompleted)
+                    {
+                        _lastCompletionLogged = false;  // 重置标志
+                    }
+                    _lastOperationCompleted = currentCompleted;
+                    // 只在状态变化或新完成时触发事件
+                    if (statusChanged || isNewCompletion)
                     {
                         OnTighteningDataReceived?.Invoke(data);
-
                         if (DateTime.Now - _lastEventLogTime > _eventLogInterval)
                         {
                             LogManager.LogInfo($"拧紧轴事件触发 - 状态: {data.GetStatusDisplayName()}, 扭矩: {data.CompletedTorque:F2}Nm");
                             _lastEventLogTime = DateTime.Now;
                         }
-                    }
-
-                    if (data.IsOperationCompleted)
-                    {
-                        LogManager.LogInfo($"拧紧操作完成 - 状态: {data.Status}, 扭矩: {data.CompletedTorque:F2}Nm, 结果: {(data.IsQualified ? "合格" : "不合格")}");
                     }
                 }
             }
@@ -732,44 +804,28 @@ namespace TailInstallationSystem
                 }
 
                 busTcpClient = new ModbusTcpNet(_config.PLC.IP, _config.PLC.Port, _config.PLC.Station);
-
-                busTcpClient.ConnectTimeOut = 5000;              // 连接超时
-                busTcpClient.ReceiveTimeOut = 3000;              // 接收超时  
-                busTcpClient.AddressStartWithZero = true;        // 地址从0开始
-                busTcpClient.IsStringReverse = false;            // 不反转字符串
-
-                LogManager.LogInfo($"🔧 PLC客户端配置:");
-                LogManager.LogInfo($"   - 目标: {_config.PLC.IP}:{_config.PLC.Port}");
-                LogManager.LogInfo($"   - 站号: {_config.PLC.Station}");
-                LogManager.LogInfo($"   - 地址零起: {busTcpClient.AddressStartWithZero}");
+                busTcpClient.ConnectTimeOut = 5000;
+                busTcpClient.ReceiveTimeOut = 3000;
+                busTcpClient.AddressStartWithZero = true;
+                busTcpClient.IsStringReverse = false;
 
                 var connect = await busTcpClient.ConnectServerAsync();
 
                 if (connect.IsSuccess)
                 {
-                    LogManager.LogInfo("TCP连接成功，验证Modbus通信...");
+                    // 使用配置的触发地址进行验证（D501 -> 501）
+                    string testAddress = _config.PLC.TriggerAddress.Replace("D", "");
+                    var testResult = await Task.Run(() => busTcpClient.ReadInt16(testAddress, 1));
 
-                    try
+                    if (testResult.IsSuccess)
                     {
-                        string testAddress = _config.PLC.TriggerAddress.Replace("D", "");
-                        var testResult = await Task.Run(() => busTcpClient.ReadInt16(testAddress, 1));
-                        if (testResult.IsSuccess)
-                        {
-                            LogManager.LogInfo($"Modbus通信验证成功 - 地址100读取值: {testResult.Content[0]}");
-                            connectSuccess_PLC = true;
-                            return true;
-                        }
-                        else
-                        {
-                            LogManager.LogError($"Modbus通信验证失败: {testResult.Message}");
-                            busTcpClient.ConnectClose();
-                            busTcpClient = null;
-                            return false;
-                        }
+                        connectSuccess_PLC = true;
+                        LogManager.LogInfo($"PLC连接成功: {_config.PLC.IP}:{_config.PLC.Port}");
+                        return true;
                     }
-                    catch (Exception readEx)
+                    else
                     {
-                        LogManager.LogError($"Modbus读取测试异常: {readEx.Message}");
+                        LogManager.LogError($"PLC连接验证失败: {testResult.Message}");
                         busTcpClient.ConnectClose();
                         busTcpClient = null;
                         return false;
@@ -777,7 +833,7 @@ namespace TailInstallationSystem
                 }
                 else
                 {
-                    LogManager.LogError($"TCP连接失败: {connect.Message}");
+                    LogManager.LogError($"PLC连接失败: {connect.Message}");
                     return false;
                 }
             }
@@ -788,6 +844,7 @@ namespace TailInstallationSystem
                 return false;
             }
         }
+
 
         public async Task<bool> CheckPLCTrigger()
         {

@@ -37,7 +37,7 @@ namespace TailInstallationSystem
                 if (Enum.TryParse<LogLevel>(levelName, true, out var level))
                 {
                     _currentLogLevel = level;
-                    WriteLog(LogLevel.Info, $"日志级别已设置为: {levelName}");
+                    // 移除这里的日志输出，让调用者决定是否记录
                 }
                 else
                 {

@@ -15,6 +15,7 @@ namespace TailInstallationSystem.Utils
 
         // 配置变更事件（可选订阅）
         public static event Action<CommunicationConfig> OnConfigChanged;
+        private static string _lastAppliedLogLevel = null;
 
         static ConfigManager()
         {
@@ -141,15 +142,27 @@ namespace TailInstallationSystem.Utils
             }
         }
 
-        // 🔧 新增：应用日志设置到LogManager
+        // 应用日志设置到LogManager
         private static void ApplyLoggingSettings(CommunicationConfig config)
         {
             try
             {
                 if (config?.System?.LogLevel != null)
                 {
-                    LogManager.SetLogLevel(config.System.LogLevel);
-                    LogManager.LogInfo($"已应用日志级别: {config.System.LogLevel}");
+                    // 只在首次设置或级别改变时记录
+                    if (_lastAppliedLogLevel == null)
+                    {
+                        LogManager.SetLogLevel(config.System.LogLevel);
+                        LogManager.LogInfo($"日志级别初始化为: {config.System.LogLevel}");
+                        _lastAppliedLogLevel = config.System.LogLevel;
+                    }
+                    else if (_lastAppliedLogLevel != config.System.LogLevel)
+                    {
+                        LogManager.SetLogLevel(config.System.LogLevel);
+                        LogManager.LogInfo($"日志级别已更改: {_lastAppliedLogLevel} → {config.System.LogLevel}");
+                        _lastAppliedLogLevel = config.System.LogLevel;
+                    }
+                    // 级别未改变时不输出日志
                 }
             }
             catch (Exception ex)

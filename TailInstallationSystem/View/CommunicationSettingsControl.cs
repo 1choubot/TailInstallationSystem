@@ -172,6 +172,7 @@ namespace TailInstallationSystem
 
                 LogManager.LogInfo($"测试拧紧轴连接: {ip}:{port}, 站号:{station}");
 
+                // 这里只是测试连接，不会启动轮询
                 bool success = await TestTighteningAxisConnection(ip, port, station);
 
                 if (success)

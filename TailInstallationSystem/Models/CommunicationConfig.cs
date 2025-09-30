@@ -99,14 +99,50 @@ namespace TailInstallationSystem.Models
         public int TimeoutSeconds { get; set; } = 10;
 
         // 拧紧轴特定配置
-        public int StatusPollingIntervalMs { get; set; } = 1000; // 从500ms增加到1000ms减少轮询频率
+        public int StatusPollingIntervalMs { get; set; } = 2000; // 🔧 从1000ms增加到2000ms减少轮询频率
         public int MaxOperationTimeoutSeconds { get; set; } = 1200; // 最大操作超时时间
+
+        // 🔧 新增：错误处理和轮询控制配置（不修改设备地址）
+        /// <summary>
+        /// 启用错误恢复机制
+        /// </summary>
+        public bool EnableErrorRecovery { get; set; } = true;
+        
+        /// <summary>
+        /// 最大连续错误次数，超过此数量将停止轮询
+        /// </summary>
+        public int MaxConsecutiveErrors { get; set; } = 3;
+        
+        /// <summary>
+        /// 错误恢复延迟（毫秒），连续错误后的等待时间
+        /// </summary>
+        public int ErrorRecoveryDelayMs { get; set; } = 5000;
+        
+        /// <summary>
+        /// 连接验证超时时间（毫秒）
+        /// </summary>
+        public int ConnectionValidationTimeoutMs { get; set; } = 3000;
+        
+        /// <summary>
+        /// 是否在初始化时验证设备可用性（只有验证成功才启动轮询）
+        /// </summary>
+        public bool ValidateDeviceOnInit { get; set; } = true;
+        
+        /// <summary>
+        /// 设备断开时是否自动停止轮询
+        /// </summary>
+        public bool AutoStopPollingOnDisconnect { get; set; } = true;
+        
+        /// <summary>
+        /// 重连尝试间隔（秒）
+        /// </summary>
+        public int ReconnectIntervalSeconds { get; set; } = 30;
 
         // 扭矩范围配置（可选，如果需要在客户端验证）
         public double MinTorque { get; set; } = 0.1;
         public double MaxTorque { get; set; } = 10.0;
 
-        // 关键寄存器地址
+        // 关键寄存器地址 - 保持说明书原有地址不变
         public ModbusRegisterAddresses Registers { get; set; } = new ModbusRegisterAddresses();
     }
     // 拧紧轴Modbus寄存器地址配置
@@ -124,12 +160,15 @@ namespace TailInstallationSystem.Models
         public int LowerLimitTorque { get; set; } = 5002;  // 判断下限扭矩
         public int UpperLimitTorque { get; set; } = 5004;  // 判断上限扭矩
 
-        // 统计相关
+        // 统计相关 - 保持说明书原有地址
         public int QualifiedCount { get; set; } = 5088;    // 合格数记录
         public int TighteningMode { get; set; } = 5000;    // 紧固模式
 
-        // 角度相关（如果需要）
+        // 角度相关 - 保持说明书原有地址
         public int RealtimeAngle { get; set; } = 5098;     // 实时角度
+        
+        // 🔧 新增：用于连接验证的备用地址（不替换原有地址）
+        public int TestRegister { get; set; } = 5000;      // 用于连接测试，使用紧固模式地址作为测试
     }
 
     public class PCConfig
