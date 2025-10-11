@@ -43,6 +43,9 @@
             this.btnSettings = new AntdUI.Button();
             this.btnStop = new AntdUI.Button();
             this.btnStart = new AntdUI.Button();
+            this.workModeDivider = new AntdUI.Divider();
+            this.workModeLabel = new AntdUI.Label();
+            this.workModeSwitch = new AntdUI.Switch();
             this.statusCards = new AntdUI.Panel();
             this.pcStatusCard = new AntdUI.Panel();
             this.pcIndicator = new AntdUI.Panel();
@@ -190,6 +193,9 @@
             this.controlPanel.Controls.Add(this.btnSettings);
             this.controlPanel.Controls.Add(this.btnStop);
             this.controlPanel.Controls.Add(this.btnStart);
+            this.controlPanel.Controls.Add(this.workModeDivider);
+            this.controlPanel.Controls.Add(this.workModeLabel);
+            this.controlPanel.Controls.Add(this.workModeSwitch);
             this.controlPanel.Dock = System.Windows.Forms.DockStyle.Top;
             this.controlPanel.Location = new System.Drawing.Point(20, 140);
             this.controlPanel.Name = "controlPanel";
@@ -242,6 +248,38 @@
             this.btnStart.TabIndex = 0;
             this.btnStart.Text = "启动系统";
             this.btnStart.Type = AntdUI.TTypeMini.Success;
+            // 
+            // workModeDivider
+            // 
+            this.workModeDivider.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
+            this.workModeDivider.Location = new System.Drawing.Point(440, 20);
+            this.workModeDivider.Name = "workModeDivider";
+            this.workModeDivider.Vertical = true;
+            this.workModeDivider.Size = new System.Drawing.Size(2, 45);
+            this.workModeDivider.TabIndex = 20;
+            // 
+            // workModeLabel
+            // 
+            this.workModeLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Bold);
+            this.workModeLabel.ForeColor = System.Drawing.Color.FromArgb(64, 64, 64);
+            this.workModeLabel.Location = new System.Drawing.Point(460, 23);
+            this.workModeLabel.Name = "workModeLabel";
+            this.workModeLabel.Size = new System.Drawing.Size(180, 30);
+            this.workModeLabel.TabIndex = 21;
+            this.workModeLabel.Text = "工作模式：完整流程";
+            this.workModeLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
+            // workModeSwitch
+            // 
+            this.workModeSwitch.AutoCheck = true;
+            this.workModeSwitch.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
+            this.workModeSwitch.Location = new System.Drawing.Point(650, 25);
+            this.workModeSwitch.Name = "workModeSwitch";
+            this.workModeSwitch.Size = new System.Drawing.Size(60, 24);
+            this.workModeSwitch.TabIndex = 22;
+            this.workModeSwitch.Text = "";
+            this.workModeSwitch.CheckedChanged += new AntdUI.BoolEventHandler(this.workModeSwitch_CheckedChanged);
+
             // 
             // statusCards
             // 
@@ -463,5 +501,9 @@
         private AntdUI.Label plcStatusLabel;
         private AntdUI.Label plcTitleLabel;
         private System.Windows.Forms.TextBox logTextBox;
+        private AntdUI.Switch workModeSwitch;
+        private AntdUI.Label workModeLabel;
+        private AntdUI.Divider workModeDivider;
+
     }
 }

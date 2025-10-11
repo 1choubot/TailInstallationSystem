@@ -19,6 +19,7 @@ namespace TailInstallationSystem
         private bool? _lastPLCTriggerState = null;
         private DateTime _lastDetailedLogTime = DateTime.MinValue;
         private readonly TimeSpan _detailedLogInterval = TimeSpan.FromSeconds(10);
+        private int _lastD500Value = 0;
         private int _lastD501Value = 0;  // 保存上一次D501的值
         private DateTime _lastD501ChangeTime = DateTime.MinValue;
         private CancellationTokenSource _heartbeatCts = null;
@@ -29,6 +30,21 @@ namespace TailInstallationSystem
         private bool _lastOperationCompleted = false;
         private static bool _lastCompletionLogged = false;
 
+        // 自动重连相关
+        private System.Threading.Timer _reconnectTimer;
+        private bool _isReconnecting = false;
+        private readonly object _reconnectLock = new object();
+
+        // 状态防抖
+        private volatile bool _lastPLCStatus = false;
+        private volatile bool _lastScannerStatus = false;
+        private volatile bool _lastTighteningStatus = false;
+        private volatile bool _lastPCStatus = false;
+        private readonly object _statusLock = new object();
+
+        // 心跳状态管理
+        private volatile bool _isHeartbeatRunning = false;
+        private readonly object _heartbeatLock = new object();
 
         // 拧紧轴轮询状态追踪
         private int _pollCount = 0;
@@ -108,8 +124,6 @@ namespace TailInstallationSystem
                 LogManager.LogInfo($"  - PC: {_config.PC.IP}:{_config.PC.Port} (服务端模式: {_config.PC.IsServer})");
                 LogManager.LogInfo($"  - 扫码枪: {_config.Scanner.IP}:{_config.Scanner.Port}");
                 LogManager.LogInfo($"  - 拧紧轴: {_config.TighteningAxis.IP}:{_config.TighteningAxis.Port}");
-                LogManager.LogInfo($"  - PLC触发地址: {_config.PLC.StartSignalAddress}");
-                LogManager.LogInfo($"  - PLC确认地址: {_config.PLC.ConfirmSignalAddress}");
 
                 _firstInstanceCreated = true;
                 _lastConfigSummary = configSummary;
@@ -181,7 +195,7 @@ namespace TailInstallationSystem
 
                 // 初始化PLC连接
                 bool plcResult = await InitializePLC();
-                OnDeviceConnectionChanged?.Invoke("PLC", plcResult);
+                SafeTriggerDeviceConnectionChanged("PLC", plcResult);
 
                 // 初始化PC TCP连接
                 bool pcResult = await InitializePCConnection();
@@ -196,6 +210,8 @@ namespace TailInstallationSystem
                 OnDeviceConnectionChanged?.Invoke("TighteningAxis", tighteningAxisResult);
 
                 LogManager.LogInfo($"设备连接初始化完成 - PLC:{plcResult}, PC:{pcResult}, 扫码枪:{scannerResult}, 拧紧轴:{tighteningAxisResult}");
+
+                StartAutoReconnect();
                 return plcResult; 
             }
             catch (Exception ex)
@@ -286,14 +302,13 @@ namespace TailInstallationSystem
                 _pollingCts = new CancellationTokenSource();
                 isStatusPolling = true;
 
-                // 🔧 修改：使用更安全的轮询逻辑
                 Task.Run(async () =>
                 {
                     LogManager.LogInfo($"拧紧轴状态轮询任务启动");
 
                     while (!_isDisposing && isStatusPolling)
                     {
-                        // 🔧 关键修改：在每次循环开始时检查取消令牌
+                        // 每次循环开始时检查取消令牌
                         var currentCts = _pollingCts;
                         if (currentCts == null || currentCts.IsCancellationRequested)
                         {
@@ -305,7 +320,6 @@ namespace TailInstallationSystem
                         {
                             await PollTighteningAxisStatus();
 
-                            // 🔧 修复：安全的延时等待
                             var intervalMs = _config?.TighteningAxis?.StatusPollingIntervalMs ?? 500;
 
                             // 再次检查取消令牌是否仍然有效
@@ -371,10 +385,9 @@ namespace TailInstallationSystem
             {
                 LogManager.LogInfo($"正在停止拧紧轴状态轮询... (断开连接: {disconnectClient})");
 
-                // 🔧 修复：先停止轮询标志
+                // 先停止轮询标志
                 isStatusPolling = false;
 
-                // 🔧 修复：安全取消和释放令牌
                 var currentCts = _pollingCts;
                 _pollingCts = null; // 先设为 null，避免其他地方继续使用
 
@@ -458,56 +471,83 @@ namespace TailInstallationSystem
             {
                 LogManager.LogDebug($"拧紧轴轮询执行中，第{_pollCount}次");
             }
+
             if (!connectSuccess_TighteningAxis || !isStatusPolling || tighteningAxisClient == null)
                 return;
+
             try
             {
                 var data = await ReadTighteningAxisData();
                 if (data != null)
                 {
                     bool statusChanged = false;
-                    bool isNewCompletion = false;  // 新增：是否是新的完成事件
-                                                   // 命令状态变化检测
+                    bool isNewCompletion = false;
+
                     if (data.ControlCommand != _lastCommandState)
                     {
-                        LogManager.LogInfo($"拧紧轴控制命令变化: {_lastCommandState} → {data.ControlCommand}");
+                        if (_lastCommandState != -999)
+                        {
+                            if (data.ControlCommand == 100 || data.ControlCommand == 0)
+                            {
+                                string action = data.ControlCommand == 100 ? "启动" : "完成";
+                                LogManager.LogDebug($"拧紧命令 | {_lastCommandState}→{data.ControlCommand} | 动作:{action}");
+                            }
+                            else
+                            {
+                                LogManager.LogDebug($"拧紧命令 | {_lastCommandState}→{data.ControlCommand}");
+                            }
+                            statusChanged = true;
+                        }
+
                         _lastCommandState = data.ControlCommand;
-                        statusChanged = true;
                     }
-                    // 运行状态变化检测
+
                     if (data.RunningStatusCode != _lastRunningStatus)
                     {
-                        LogManager.LogInfo($"拧紧轴运行状态变化: {_lastRunningStatus} → {data.RunningStatusCode} ({data.GetStatusDisplayName()})");
+                        string oldStatus = GetStatusName(_lastRunningStatus);
+                        string newStatus = data.GetStatusDisplayName();
+
+                        LogManager.LogInfo($"拧紧状态 | {oldStatus}→{newStatus} | 实时扭矩:{data.RealtimeTorque:F2}Nm");
+
                         _lastRunningStatus = data.RunningStatusCode;
                         statusChanged = true;
                     }
+
                     // 完成状态检测（只检测从false到true的变化）
                     bool currentCompleted = data.IsOperationCompleted;
                     if (currentCompleted && !_lastOperationCompleted)
                     {
                         isNewCompletion = true;
+
                         // 只记录一次完成日志
                         if (!_lastCompletionLogged)
                         {
-                            LogManager.LogInfo($"拧紧操作完成 - 状态: {data.Status}, 扭矩: {data.CompletedTorque:F2}Nm, 结果: {(data.IsQualified ? "合格" : "不合格")}");
+                            LogManager.LogInfo($"拧紧完成 | " +
+                                             $"扭矩:{data.CompletedTorque:F2}/{data.TargetTorque:F2}Nm | " +
+                                             $"范围:[{data.LowerLimitTorque:F2},{data.UpperLimitTorque:F2}] | " +
+                                             $"结果:{(data.IsQualified ? "✓合格" : "✗" + data.QualityResult)}");
                             _lastCompletionLogged = true;
                         }
                     }
                     else if (!currentCompleted)
                     {
-                        _lastCompletionLogged = false;  // 重置标志
+                        _lastCompletionLogged = false;
                     }
+
                     _lastOperationCompleted = currentCompleted;
+
                     // 只在状态变化或新完成时触发事件
                     if (statusChanged || isNewCompletion)
                     {
                         OnTighteningDataReceived?.Invoke(data);
-                        if (DateTime.Now - _lastEventLogTime > _eventLogInterval)
-                        {
-                            LogManager.LogInfo($"拧紧轴事件触发 - 状态: {data.GetStatusDisplayName()}, 扭矩: {data.CompletedTorque:F2}Nm");
-                            _lastEventLogTime = DateTime.Now;
-                        }
                     }
+                }
+                else
+                {
+                    // 数据为null，判定为连接断开
+                    LogManager.LogWarning("拧紧轴数据读取失败，可能已断开连接");
+                    connectSuccess_TighteningAxis = false;
+                    OnDeviceConnectionChanged?.Invoke("TighteningAxis", false);
                 }
             }
             catch (Exception ex)
@@ -515,10 +555,13 @@ namespace TailInstallationSystem
                 if (isStatusPolling && !_isDisposing)
                 {
                     LogManager.LogError($"轮询拧紧轴状态异常: {ex.Message}");
+                    // 异常时更新连接状态
+                    connectSuccess_TighteningAxis = false;
+                    OnDeviceConnectionChanged?.Invoke("TighteningAxis", false);
                 }
             }
         }
-
+      
         // 读取拧紧轴数据
         public async Task<TighteningAxisData> ReadTighteningAxisData()
         {
@@ -544,6 +587,8 @@ namespace TailInstallationSystem
                 else
                 {
                     LogManager.LogError($"读取控制命令字失败: {controlCommandResult.Message}");
+                    connectSuccess_TighteningAxis = false;
+                    OnDeviceConnectionChanged?.Invoke("TighteningAxis", false);
                     return null;
                 }
 
@@ -568,13 +613,19 @@ namespace TailInstallationSystem
                     }
                 }
 
-                // 4. 读取完成扭矩 - 修复版本
+                // 4. 读取完成扭矩
                 var completedTorqueResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.CompletedTorque.ToString(), 2)); // 读取2个寄存器
 
                 if (completedTorqueResult.IsSuccess)
                 {
+                    LogManager.LogDebug($"[拧紧轴] 完成扭矩原始数据 | " +
+                       $"寄存器5092[0]:{completedTorqueResult.Content[0]} | " +
+                       $"寄存器5092[1]:{completedTorqueResult.Content[1]}");
+
                     data.CompletedTorque = ConvertToFloat(completedTorqueResult.Content);
+
+                    LogManager.LogDebug($"[拧紧轴] 扭矩转换结果 | {data.CompletedTorque:F4}Nm");
 
                     // 添加数据有效性验证
                     if (!IsValidTorqueValue(data.CompletedTorque))
@@ -694,11 +745,12 @@ namespace TailInstallationSystem
             catch (Exception ex)
             {
                 LogManager.LogError($"读取拧紧轴数据失败: {ex.Message}");
+                connectSuccess_TighteningAxis = false;
+                OnDeviceConnectionChanged?.Invoke("TighteningAxis", false);
                 return null;
             }
         }
 
-        // 新增辅助方法
         private float ConvertToFloat(short[] registers)
         {
             if (registers == null || registers.Length < 2)
@@ -908,7 +960,7 @@ namespace TailInstallationSystem
                     {
                         LogManager.LogWarning($"PLC触发检测连接失败: {connect.Message}");
                         connectSuccess_PLC = false;
-                        OnDeviceConnectionChanged?.Invoke("PLC", false);
+                        SafeTriggerDeviceConnectionChanged("PLC", false);
                     }
                 }
                 return false;
@@ -1047,12 +1099,20 @@ namespace TailInstallationSystem
                 else
                 {
                     LogManager.LogError($"读取PLC寄存器失败 - {address}: {result.Message}");
+                    if (result.Message.Contains("远程主机强迫关闭") ||
+                        result.Message.Contains("目标计算机积极拒绝"))
+                    {
+                        connectSuccess_PLC = false;
+                        SafeTriggerDeviceConnectionChanged("PLC", false);
+                    }
                     return null;
                 }
             }
             catch (Exception ex)
             {
                 LogManager.LogError($"读取PLC寄存器异常 - {address}: {ex.Message}");
+                connectSuccess_PLC = false;
+                SafeTriggerDeviceConnectionChanged("PLC", false);
                 return null;
             }
         }
@@ -1061,14 +1121,27 @@ namespace TailInstallationSystem
         /// </summary>
         public async Task<bool> WritePLCDRegister(string address, int value)
         {
+            if (_isDisposing || _disposed)
+            {
+                LogManager.LogDebug($"跳过PLC写入（系统正在释放） - {address}: {value}");
+                return false;
+            }
+            
             if (!connectSuccess_PLC || busTcpClient == null)
                 return false;
+                
             try
             {
                 // D寄存器地址处理
                 string numericAddress = address.ToUpper().Replace("D", "");
 
                 LogManager.LogInfo($"写入PLC寄存器 - {address}: {value}");
+
+                if (busTcpClient == null)
+                {
+                    LogManager.LogWarning($"PLC客户端已释放，取消写入 - {address}");
+                    return false;
+                }
 
                 var result = await Task.Run(() => busTcpClient.Write(numericAddress, (short)value));
 
@@ -1083,74 +1156,239 @@ namespace TailInstallationSystem
                     return false;
                 }
             }
+            catch (ObjectDisposedException)
+            {
+                LogManager.LogDebug($"PLC客户端已释放 - {address}");
+                return false;
+            }
+            catch (NullReferenceException)
+            {
+                LogManager.LogDebug($"PLC客户端为空 - {address}");
+                return false;
+            }
             catch (Exception ex)
             {
                 LogManager.LogError($"写入PLC寄存器异常 - {address}: {ex.Message}");
                 return false;
             }
         }
+
         /// <summary>
-        /// 启动心跳信号
+        /// 检查D500扫码触发信号（边沿检测）
+        /// </summary>
+        public async Task<bool> CheckScanTrigger()
+        {
+            if (!connectSuccess_PLC)
+                return false;
+
+            try
+            {
+                var currentValue = await ReadPLCDRegister(_config.PLC.ScanTriggerAddress);
+
+                if (currentValue.HasValue)
+                {
+                    // 边沿检测：从0变为1时触发
+                    if (currentValue.Value == 1 && _lastD500Value == 0)
+                    {
+                        _lastD500Value = currentValue.Value;
+                        LogManager.LogInfo($"检测到扫码触发信号 - {_config.PLC.ScanTriggerAddress}: 0 → 1");
+                        return true;
+                    }
+
+                    _lastD500Value = currentValue.Value;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"检查扫码触发异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 检查D501拧紧数据读取触发信号（边沿检测）
+        /// </summary>
+        public async Task<bool> CheckTighteningTrigger()
+        {
+            if (!connectSuccess_PLC)
+                return false;
+
+            try
+            {
+                var currentValue = await ReadPLCDRegister(_config.PLC.TighteningTriggerAddress);
+
+                if (currentValue.HasValue)
+                {
+                    // 边沿检测：从0变为1时触发
+                    if (currentValue.Value == 1 && _lastD501Value == 0)
+                    {
+                        _lastD501Value = currentValue.Value;
+                        LogManager.LogInfo($"检测到拧紧数据读取触发 - {_config.PLC.TighteningTriggerAddress}: 0 → 1");
+                        return true;
+                    }
+
+                    _lastD501Value = currentValue.Value;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"检查拧紧触发异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 启动心跳信号（线程安全，防止重复启动）
         /// </summary>
         public async Task StartHeartbeat()
         {
-            StopHeartbeat(); // 先停止已有的心跳
-
+            lock (_heartbeatLock)
+            {
+                if (_isHeartbeatRunning)
+                {
+                    LogManager.LogWarning("心跳信号已在运行，跳过重复启动");
+                    return;
+                }
+            }
+            
+            StopHeartbeat();
+            
+            lock (_heartbeatLock)
+            {
+                _isHeartbeatRunning = true;
+            }
+            
             _heartbeatCts = new CancellationTokenSource();
             var token = _heartbeatCts.Token;
-
             LogManager.LogInfo($"启动心跳信号 - {_config.PLC.HeartbeatAddress}");
 
             _ = Task.Run(async () =>
             {
-                int heartbeatValue = 0;
+                int heartbeatLogCounter = 0;
+                bool hasWrittenHeartbeat = false;
 
-                while (!token.IsCancellationRequested && connectSuccess_PLC)
+                while (!token.IsCancellationRequested && connectSuccess_PLC && !_isDisposing)
                 {
                     try
                     {
-                        // 心跳值在0和1之间切换
-                        heartbeatValue = heartbeatValue == 0 ? 1 : 0;
+                        bool writeSuccess = await WritePLCDRegisterQuiet(_config.PLC.HeartbeatAddress, 1);
+                        if (writeSuccess)
+                        {
+                            hasWrittenHeartbeat = true;
+                        }
 
                         if (heartbeatLogCounter % 10 == 0)
                         {
-                            LogManager.LogDebug($"心跳信号 - {_config.PLC.HeartbeatAddress}: {heartbeatValue}");
+                            LogManager.LogDebug($"心跳信号运行中 - 第{heartbeatLogCounter}次");
                         }
                         heartbeatLogCounter++;
-
-                        await WritePLCDRegisterQuiet(_config.PLC.HeartbeatAddress, heartbeatValue);
 
                         await Task.Delay(300, token);
                     }
                     catch (OperationCanceledException)
                     {
+                        LogManager.LogDebug("心跳任务正常取消");
                         break;
                     }
                     catch (Exception ex)
                     {
                         LogManager.LogError($"心跳发送异常: {ex.Message}");
-                        await Task.Delay(1000, token);
+                        
+                        if (_isDisposing || !connectSuccess_PLC)
+                        {
+                            break;
+                        }
+                        
+                        try
+                        {
+                            await Task.Delay(1000, token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            break;
+                        }
                     }
                 }
 
-                // 心跳停止时，将信号置0
-                try
+                // 心跳复位逻辑（循环退出后立即执行）
+                if (hasWrittenHeartbeat)
                 {
-                    await WritePLCDRegister(_config.PLC.HeartbeatAddress, 0);
-                    LogManager.LogInfo("心跳信号已停止并复位");
+                    try
+                    {
+                        if (!connectSuccess_PLC || busTcpClient == null)
+                        {
+                            LogManager.LogDebug("心跳停止：PLC已断开，跳过寄存器复位");
+                            return;
+                        }
+
+                        // 直接调用底层写入，绕过状态检查
+                        if (busTcpClient != null)
+                        {
+                            string numericAddress = _config.PLC.HeartbeatAddress.ToUpper().Replace("D", "");
+                            var result = await Task.Run(() =>
+                            {
+                                try
+                                {
+                                    if (busTcpClient == null) return null;
+                                    return busTcpClient.Write(numericAddress, (short)0);
+                                }
+                                catch
+                                {
+                                    return null;
+                                }
+                            });
+
+                            if (result != null && result.IsSuccess)
+                            {
+                                LogManager.LogInfo("心跳信号已停止并复位寄存器(D530=0)");
+                            }
+                            else
+                            {
+                                LogManager.LogDebug("心跳复位跳过：PLC连接已断开");
+                            }
+                        }
+                        else
+                        {
+                            LogManager.LogDebug("心跳复位跳过：PLC客户端已释放");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogManager.LogDebug($"心跳寄存器复位异常: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    LogManager.LogError($"复位心跳信号失败: {ex.Message}");
+                    LogManager.LogInfo("心跳信号已停止（未写入过心跳，无需复位）");
                 }
+
             }, token);
         }
 
-        // 静默写入方法
+
+        /// <summary>
+        /// 查询心跳是否正在运行
+        /// </summary>
+        public bool IsHeartbeatRunning()
+        {
+            lock (_heartbeatLock)
+            {
+                return _isHeartbeatRunning;
+            }
+        }
+
+        /// <summary>
+        /// 静默写入PLC寄存器（不输出日志，用于心跳）
+        /// </summary>
         private async Task<bool> WritePLCDRegisterQuiet(string address, int value)
         {
             if (!connectSuccess_PLC || busTcpClient == null)
                 return false;
+
             try
             {
                 string numericAddress = address.ToUpper().Replace("D", "");
@@ -1162,19 +1400,62 @@ namespace TailInstallationSystem
                 return false;
             }
         }
+
+
         /// <summary>
-        /// 停止心跳信号
+        /// 停止心跳信号（线程安全）
         /// </summary>
         public void StopHeartbeat()
         {
+            // 检查状态
+            bool wasRunning;
+            lock (_heartbeatLock)
+            {
+                wasRunning = _isHeartbeatRunning;
+                _isHeartbeatRunning = false;
+            }
+
+            if (!wasRunning)
+            {
+                LogManager.LogDebug("心跳信号未运行，跳过停止操作");
+                return;
+            }
+
             if (_heartbeatCts != null)
             {
-                _heartbeatCts.Cancel();
-                _heartbeatCts.Dispose();
-                _heartbeatCts = null;
-                LogManager.LogInfo("心跳信号已停止");
+                try
+                {
+                    if (!_heartbeatCts.IsCancellationRequested)
+                    {
+                        _heartbeatCts.Cancel();
+                        LogManager.LogDebug("心跳取消令牌已发送");
+                    }
+                }
+                catch (ObjectDisposedException)
+                {
+                    LogManager.LogDebug("心跳取消令牌已被释放");
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogWarning($"取消心跳任务时异常: {ex.Message}");
+                }
+
+                try
+                {
+                    _heartbeatCts.Dispose();
+                    _heartbeatCts = null;
+                    LogManager.LogDebug("心跳取消令牌已释放");
+                }
+                catch (ObjectDisposedException)
+                {
+                    LogManager.LogDebug("心跳取消令牌已被释放");
+                }
             }
+
+            LogManager.LogInfo("心跳信号已停止");
         }
+
+
         /// <summary>
         /// 复位所有PLC信号
         /// </summary>
@@ -1324,7 +1605,6 @@ namespace TailInstallationSystem
             }
         }
 
-        // 在 CommunicationManager.cs 的 HandlePCClient 方法中修改
         private void HandlePCClient(TcpClient client)
         {
             string clientEndpoint = "未知客户端";
@@ -1346,7 +1626,7 @@ namespace TailInstallationSystem
                     client.ReceiveTimeout = _config.PC.TimeoutSeconds * 1000;
                     client.SendTimeout = _config.PC.TimeoutSeconds * 1000;
 
-                    // 修改：使用循环读取完整数据
+                    // 使用循环读取完整数据
                     var receivedData = new List<byte>();
                     int totalBytesRead = 0;
                     var timeout = DateTime.Now.AddSeconds(_config.PC.TimeoutSeconds);
@@ -1719,45 +1999,6 @@ namespace TailInstallationSystem
             return await TestTcpConnection(_config.Scanner.IP, _config.Scanner.Port, "扫码枪");
         }
 
-        // 拧紧轴连接测试方法
-        private async Task<bool> TestTighteningAxisConnection(string ip, int port, byte station)
-        {
-            try
-            {
-                var modbusTcpClient = new ModbusTcpNet(ip, port, station);
-                var connectResult = await Task.Run(() => modbusTcpClient.ConnectServer());
-
-                if (connectResult.IsSuccess)
-                {
-                    // 修改：使用ReadInt16而不是ReadFloat
-                    var readResult = await Task.Run(() => modbusTcpClient.ReadInt16("5100", 1));
-                    modbusTcpClient.ConnectClose();
-
-                    if (readResult.IsSuccess)
-                    {
-                        LogManager.LogInfo($"拧紧轴测试读取成功，运行状态值: {readResult.Content[0]}");
-                        return true;
-                    }
-                    else
-                    {
-                        LogManager.LogWarning($"拧紧轴连接成功但读取数据失败: {readResult.Message}");
-                        return false;
-                    }
-                }
-                else
-                {
-                    LogManager.LogWarning($"拧紧轴Modbus连接失败: {connectResult.Message}");
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"拧紧轴连接测试异常: {ex.Message}");
-                return false;
-            }
-        }
-
-
         public async Task<bool> TestPCConnection()
         {
             return await TestTcpConnection(_config.PC.IP, _config.PC.Port, "PC");
@@ -1868,7 +2109,7 @@ namespace TailInstallationSystem
             bool lockTaken = false;
             try
             {
-                lockTaken = _disposeSemaphore.Wait(5000); // 设置超时避免死锁
+                lockTaken = _disposeSemaphore.Wait(5000);
                 if (!lockTaken)
                 {
                     LogManager.LogError("获取释放信号量超时");
@@ -1876,50 +2117,43 @@ namespace TailInstallationSystem
                 }
 
                 if (_disposed) return;
-                _isDisposing = true;
+                _isDisposing = true; 
 
                 LogManager.LogInfo("开始释放通讯管理器资源...");
 
-                // 安全取消所有任务
+                StopAutoReconnect();
+                // 1.先停止心跳（心跳任务会检测 _isDisposing）
+                StopHeartbeat();
+
+                // 2. 取消所有任务
                 try
                 {
                     _cancellationTokenSource?.Cancel();
                 }
-                catch (ObjectDisposedException)
-                {
-                    // 已经释放，忽略
-                }
-                
-                // 停止心跳
-                StopHeartbeat();
-                
-                // 重置连接状态
+                catch (ObjectDisposedException) { }
+
+                // 3. 重置连接状态（防止新操作）
                 connectSuccess_PLC = false;
                 connectSuccess_PC = false;
                 connectSuccess_Scanner = false;
                 connectSuccess_TighteningAxis = false;
 
-                // 等待任务完成
+                // 4.确保心跳任务完全退出
                 try
                 {
-                    Thread.Sleep(1000);
+                    Thread.Sleep(2000);  // 从1秒增加到2秒
                 }
-                catch (ThreadInterruptedException)
-                {
-                    // 线程被中断，继续清理
-                }
+                catch (ThreadInterruptedException) { }
 
+                // 5. 最后关闭连接
                 SafeCloseAllConnections();
 
-                // 安全释放取消令牌
+                // 6. 释放取消令牌
                 try
                 {
                     _cancellationTokenSource?.Dispose();
                 }
-                catch (ObjectDisposedException)
-                {
-                    // 已经释放，忽略
-                }
+                catch (ObjectDisposedException) { }
                 finally
                 {
                     _cancellationTokenSource = null;
@@ -1934,13 +2168,16 @@ namespace TailInstallationSystem
             finally
             {
                 _disposed = true;
-                _disposeSemaphore.Release();
+                if (lockTaken)
+                {
+                    _disposeSemaphore.Release();
+                }
             }
         }
 
         private void SafeCloseAllConnections()
         {
-            // 先停止拧紧轴轮询 - 移到最前面
+            // 先停止拧紧轴轮询
             try
             {
                 isStatusPolling = false;  // 立即停止轮询标记
@@ -2040,6 +2277,201 @@ namespace TailInstallationSystem
         }
 
         #endregion
+
+        #region 自动重连机制
+
+        /// <summary>
+        /// 启动自动重连机制
+        /// </summary>
+        private void StartAutoReconnect()
+        {
+            try
+            {
+                if (_config?.System?.EnableAutoReconnect != true)
+                {
+                    LogManager.LogInfo("自动重连功能已禁用");
+                    return;
+                }
+
+                var intervalSeconds = _config.System.ReconnectIntervalSeconds;
+                if (intervalSeconds < 5)
+                {
+                    intervalSeconds = 30; // 最小30秒
+                }
+
+                _reconnectTimer?.Dispose();
+                _reconnectTimer = new System.Threading.Timer(
+                    AutoReconnectCallback,
+                    null,
+                    TimeSpan.FromSeconds(intervalSeconds),
+                    TimeSpan.FromSeconds(intervalSeconds));
+
+                LogManager.LogInfo($"自动重连机制已启动，间隔: {intervalSeconds}秒");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"启动自动重连机制失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 停止自动重连机制
+        /// </summary>
+        private void StopAutoReconnect()
+        {
+            try
+            {
+                _reconnectTimer?.Dispose();
+                _reconnectTimer = null;
+                LogManager.LogInfo("自动重连机制已停止");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"停止自动重连机制异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 自动重连回调
+        /// </summary>
+        private async void AutoReconnectCallback(object state)
+        {
+            lock (_reconnectLock)
+            {
+                if (_isReconnecting || _isDisposing)
+                {
+                    return;
+                }
+                _isReconnecting = true;
+            }
+
+            try
+            {
+                // 检查并重连PLC
+                if (!connectSuccess_PLC)
+                {
+                    LogManager.LogInfo("尝试重连PLC...");
+                    bool plcResult = await InitializePLC();
+                    if (plcResult)
+                    {
+                        LogManager.LogInfo("PLC重连成功");
+                        SafeTriggerDeviceConnectionChanged("PLC", true);
+                    }
+                }
+
+                // 检查并重连扫码枪
+                if (!connectSuccess_Scanner)
+                {
+                    LogManager.LogInfo("尝试重连扫码枪...");
+                    bool scannerResult = await InitializeScannerConnection();
+                    if (scannerResult)
+                    {
+                        LogManager.LogInfo("扫码枪重连成功");
+                        OnDeviceConnectionChanged?.Invoke("Scanner", true);
+                    }
+                }
+
+                // 检查并重连拧紧轴
+                if (!connectSuccess_TighteningAxis)
+                {
+                    LogManager.LogInfo("尝试重连拧紧轴...");
+                    bool tighteningResult = await InitializeTighteningAxisConnection(true);
+                    if (tighteningResult)
+                    {
+                        LogManager.LogInfo("拧紧轴重连成功");
+                        OnDeviceConnectionChanged?.Invoke("TighteningAxis", true);
+                    }
+                }
+
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"自动重连异常: {ex.Message}");
+            }
+            finally
+            {
+                lock (_reconnectLock)
+                {
+                    _isReconnecting = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 安全触发设备连接状态变化事件（带防抖）
+        /// </summary>
+        public void SafeTriggerDeviceConnectionChanged(string deviceName, bool isConnected)
+        {
+            lock (_statusLock)
+            {
+                bool shouldTrigger = false;
+
+                switch (deviceName.ToUpper())
+                {
+                    case "PLC":
+                        if (_lastPLCStatus != isConnected)
+                        {
+                            _lastPLCStatus = isConnected;
+                            shouldTrigger = true;
+                        }
+                        break;
+                    case "SCANNER":
+                        if (_lastScannerStatus != isConnected)
+                        {
+                            _lastScannerStatus = isConnected;
+                            shouldTrigger = true;
+                        }
+                        break;
+                    case "TIGHTENINGAXIS":
+                        if (_lastTighteningStatus != isConnected)
+                        {
+                            _lastTighteningStatus = isConnected;
+                            shouldTrigger = true;
+                        }
+                        break;
+                    case "PC":
+                        if (_lastPCStatus != isConnected)
+                        {
+                            _lastPCStatus = isConnected;
+                            shouldTrigger = true;
+                        }
+                        break;
+                }
+
+                if (shouldTrigger)
+                {
+                    try
+                    {
+                        OnDeviceConnectionChanged?.Invoke(deviceName, isConnected);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogManager.LogError($"触发设备状态变化事件异常: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+
+        #endregion
+
+
+        private string GetStatusName(int statusCode)
+        {
+            switch (statusCode)
+            {
+                case -999: return "初始";
+                case 0: return "空闲";
+                case 1: return "运行中";
+                case 10: return "合格";
+                case 21: return "扭矩过低";
+                case 22: return "扭矩过高";
+                case 23: return "超时";
+                case 24: return "角度过低";
+                case 25: return "角度过高";
+                default: return $"状态{statusCode}";
+            }
+        }
 
     }
 }

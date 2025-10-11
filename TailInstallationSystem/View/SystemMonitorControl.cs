@@ -57,6 +57,7 @@ namespace TailInstallationSystem.View
 
             InitializeStatusTimer();
             InitializeDefaultState();
+            LoadWorkModeSettings();
         }
 
         private void InitializeDefaultState()
@@ -69,6 +70,145 @@ namespace TailInstallationSystem.View
             currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
             currentStatusLabel.Text = "状态: 系统未启动";
         }
+
+        /// <summary>
+        /// 加载工作模式设置
+        /// </summary>
+        private void LoadWorkModeSettings()
+        {
+            try
+            {
+                var config = ConfigManager.GetCurrentConfig();
+                var currentMode = config.System.CurrentWorkMode;
+
+                // 设置开关状态（不触发事件）
+                workModeSwitch.CheckedChanged -= workModeSwitch_CheckedChanged;
+                workModeSwitch.Checked = (currentMode == Models.WorkMode.Independent);
+                workModeSwitch.CheckedChanged += workModeSwitch_CheckedChanged;
+
+                // 更新标签显示
+                UpdateWorkModeLabel(currentMode);
+
+                // 更新控制器模式
+                if (controller != null)
+                {
+                    controller.UpdateWorkMode(currentMode);
+                }
+
+                LogManager.LogInfo($"工作模式已加载: {GetWorkModeDisplayName(currentMode)}");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"加载工作模式配置失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 工作模式开关变更事件
+        /// </summary>
+        private void workModeSwitch_CheckedChanged(object sender, AntdUI.BoolEventArgs e)
+        {
+            try
+            {
+                var newMode = e.Value ? Models.WorkMode.Independent : Models.WorkMode.FullProcess;
+
+                // 显示确认对话框
+                var message = e.Value
+                    ? "您正在切换到【独立模式】：\n\n" +
+                      "• 将忽略前端发送的工序1-3数据\n" +
+                      "• 仅执行扫码→拧紧→上传工序4\n" +
+                      "• 数据库中工序1-3列为空\n\n" +
+                      "是否确认切换？"
+                    : "您正在切换到【完整流程模式】：\n\n" +
+                      "• 接收并缓存前端发送的工序1-3数据\n" +
+                      "• 执行完整的4道工序流程\n" +
+                      "• 数据合并后上传\n\n" +
+                      "是否确认切换？";
+
+                var result = MessageBox.Show(
+                    message,
+                    "工作模式切换确认",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    // 保存配置
+                    var config = ConfigManager.GetCurrentConfig();
+                    config.System.CurrentWorkMode = newMode;
+                    ConfigManager.SaveConfig(config);
+
+                    // 更新控制器
+                    if (controller != null)
+                    {
+                        controller.UpdateWorkMode(newMode);
+                    }
+
+                    // 更新UI显示
+                    UpdateWorkModeLabel(newMode);
+
+                    LogManager.LogInfo($"工作模式已切换: {GetWorkModeDisplayName(newMode)}");
+
+                    // 显示成功提示
+                    AntdUI.Message.success(this.FindForm(), "工作模式切换成功！", autoClose: 2);
+                }
+                else
+                {
+                    // 用户取消，恢复开关状态（不触发事件）
+                    workModeSwitch.CheckedChanged -= workModeSwitch_CheckedChanged;
+                    workModeSwitch.Checked = !e.Value;
+                    workModeSwitch.CheckedChanged += workModeSwitch_CheckedChanged;
+
+                    LogManager.LogInfo("用户取消工作模式切换");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"切换工作模式失败: {ex.Message}");
+                AntdUI.Message.error(this.FindForm(), $"切换失败: {ex.Message}", autoClose: 3);
+            }
+        }
+
+        /// <summary>
+        /// 更新工作模式标签显示
+        /// </summary>
+        private void UpdateWorkModeLabel(Models.WorkMode mode)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action<Models.WorkMode>(UpdateWorkModeLabel), mode);
+                return;
+            }
+
+            switch (mode)
+            {
+                case Models.WorkMode.FullProcess:
+                    workModeLabel.Text = "工作模式：完整流程";
+                    workModeLabel.ForeColor = System.Drawing.Color.FromArgb(82, 196, 26); // 绿色
+                    break;
+                case Models.WorkMode.Independent:
+                    workModeLabel.Text = "工作模式：独立模式";
+                    workModeLabel.ForeColor = System.Drawing.Color.FromArgb(250, 173, 20); // 橙色
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 获取工作模式显示名称
+        /// </summary>
+        private string GetWorkModeDisplayName(Models.WorkMode mode)
+        {
+            switch (mode)
+            {
+                case Models.WorkMode.FullProcess:
+                    return "完整流程模式";
+                case Models.WorkMode.Independent:
+                    return "独立模式（仅工序4）";
+                default:
+                    return "未知模式";
+            }
+        }
+
 
         private void OnLogMessage(LogManager.LogLevel level, string timestamp, string message)
         {
@@ -110,6 +250,22 @@ namespace TailInstallationSystem.View
                     }
                 }
 
+                UpdateProgress(30); // 可选：调整进度显示更细致
+                if (commManager != null && commManager.IsPLCConnected)
+                {
+                    try
+                    {
+                        await commManager.StartHeartbeat();
+                        LogManager.LogInfo("系统启动完成，心跳信号已启动");
+                    }
+                    catch (Exception heartbeatEx)
+                    {
+                        LogManager.LogWarning($"心跳启动失败: {heartbeatEx.Message}，系统将继续启动");
+                        MessageBox.Show("心跳信号启动失败，但系统将继续运行", "警告", 
+                             MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+
                 UpdateProgress(50);
 
                 // 然后启动系统
@@ -127,6 +283,15 @@ namespace TailInstallationSystem.View
             }
             catch (Exception ex)
             {
+                try
+                {
+                    commManager?.StopHeartbeat();
+                    LogManager.LogInfo("系统启动失败，已停止心跳信号");
+                }
+                catch (Exception stopEx)
+                {
+                    LogManager.LogWarning($"停止心跳信号失败: {stopEx.Message}");
+                }
                 MessageBox.Show($"启动失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 UpdateProgress(0);
                 LogManager.LogError($"系统启动失败: {ex.Message}");
@@ -150,6 +315,19 @@ namespace TailInstallationSystem.View
                 else
                 {
                     LogManager.LogWarning("控制器对象为空，跳过停止操作");
+                }
+
+                if (commManager != null)
+                {
+                    try
+                    {
+                        commManager.StopHeartbeat();
+                        LogManager.LogInfo("系统已停止，心跳信号已停止");
+                    }
+                    catch (Exception heartbeatEx)
+                    {
+                        LogManager.LogWarning($"停止心跳信号失败: {heartbeatEx.Message}");
+                    }
                 }
 
                 btnStart.Enabled = true;
@@ -193,6 +371,16 @@ namespace TailInstallationSystem.View
                 StopStatusMonitoring();
 
                 controller?.EmergencyStop();
+
+                try
+                {
+                    commManager?.StopHeartbeat();
+                    LogManager.LogWarning("紧急停止：心跳信号已停止");
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"紧急停止心跳失败: {ex.Message}");
+                }
 
                 btnStart.Enabled = true;
                 btnStop.Enabled = false;
@@ -463,7 +651,12 @@ namespace TailInstallationSystem.View
             }
 
             currentStatusLabel.Text = $"状态: {status}";
-            LogManager.LogInfo($"业务流程状态: {status}");
+            if (status.Contains("成功") || status.Contains("失败") ||
+                 status.Contains("完成") || status.Contains("合格") ||
+                 status.Contains("不合格"))
+            {
+                LogManager.LogInfo($"状态更新 | {status}");
+            }
         }
 
         private void OnCurrentProductChanged(string barcode, string status)
@@ -501,7 +694,48 @@ namespace TailInstallationSystem.View
 
             try
             {
-                // 实际的健康检查逻辑...
+                // 检测PLC连接状态
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (commManager.IsPLCConnected)
+                        {
+                            // 尝试读取心跳寄存器验证连接
+                            var heartbeatValue = await commManager.ReadPLCDRegister(commManager.GetCurrentConfig().PLC.HeartbeatAddress);
+                            if (!heartbeatValue.HasValue)
+                            {
+                                // 读取失败，判定为断开
+                                SafeInvoke(() => UpdateDeviceStatus("PLC", DeviceStatus.Disconnected));
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        SafeInvoke(() => UpdateDeviceStatus("PLC", DeviceStatus.Disconnected));
+                    }
+                });
+
+                // 检测拧紧轴连接状态
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (commManager.IsTighteningAxisConnected)
+                        {
+                            // 尝试读取测试寄存器验证连接
+                            var testData = await commManager.ReadTighteningAxisData();
+                            if (testData == null)
+                            {
+                                SafeInvoke(() => UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected));
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        SafeInvoke(() => UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected));
+                    }
+                });
             }
             catch (Exception ex)
             {

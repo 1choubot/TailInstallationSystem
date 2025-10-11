@@ -128,13 +128,15 @@ namespace TailInstallationSystem
         /// </summary>
         public async Task<bool> UploadToServer(string scannedBarcode, string completeData)
         {
+            var startTime = DateTime.Now;
+
             try
             {
-                LogManager.LogInfo($"开始上传当前工序数据: {scannedBarcode}");
+                LogManager.LogInfo($"上传启动 | 条码:{scannedBarcode} | 大小:{completeData?.Length ?? 0}B | 服务器:{_config.Server.WebSocketUrl}");
 
                 // 先保存到重试队列（确保数据不丢失）
                 await AddToUploadQueue(scannedBarcode, completeData);
-                LogManager.LogInfo($"数据已保存到上传队列: {scannedBarcode}");
+                LogManager.LogDebug($"队列保存 | 条码:{scannedBarcode}");
 
                 // 立即尝试上传
                 bool uploadSuccess = await TryUploadData(scannedBarcode, completeData);
@@ -144,18 +146,21 @@ namespace TailInstallationSystem
                     // 上传成功，从队列中移除
                     await RemoveFromUploadQueue(scannedBarcode);
                     await UpdateUploadStatus(scannedBarcode, true);
-                    LogManager.LogInfo($"数据上传成功并已从队列移除: {scannedBarcode}");
+
+                    var duration = (DateTime.Now - startTime).TotalSeconds;
+                    LogManager.LogInfo($"上传完成 | 条码:{scannedBarcode} | 耗时:{duration:F1}秒");
                     return true;
                 }
                 else
                 {
-                    LogManager.LogInfo($"上传失败，数据已保存在重试队列中: {scannedBarcode}");
+                    var duration = (DateTime.Now - startTime).TotalSeconds;
+                    LogManager.LogWarning($"上传失败 | 条码:{scannedBarcode} | 耗时:{duration:F1}秒 | 已保存到重试队列");
                     return false;
                 }
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"上传流程异常: {ex.Message}");
+                LogManager.LogError($"上传异常 | 条码:{scannedBarcode} | 错误:{ex.Message}");
 
                 // 确保数据已保存到队列中（双重保险）
                 if (!string.IsNullOrEmpty(scannedBarcode))
@@ -166,7 +171,7 @@ namespace TailInstallationSystem
                     }
                     catch (Exception queueEx)
                     {
-                        LogManager.LogError($"紧急保存到队列也失败: {queueEx.Message}");
+                        LogManager.LogError($"队列保存失败 | 条码:{scannedBarcode} | 错误:{queueEx.Message} | 启动本地文件备份");
                         await SaveToLocalFile(scannedBarcode, completeData);
                     }
                 }
@@ -174,6 +179,7 @@ namespace TailInstallationSystem
                 return false;
             }
         }
+
 
         /// <summary>
         /// 通过WebSocket上传数据到服务器
@@ -183,7 +189,6 @@ namespace TailInstallationSystem
             ClientWebSocket webSocket = null;
             try
             {
-                LogManager.LogInfo($"尝试通过WebSocket上传数据: {barcode}");
 
                 webSocket = new ClientWebSocket();
                 webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
@@ -191,10 +196,11 @@ namespace TailInstallationSystem
                 var serverUri = new Uri(_config.Server.WebSocketUrl);
                 var connectToken = new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token;
 
-                LogManager.LogInfo($"正在连接WebSocket服务器: {serverUri}");
+                LogManager.LogDebug($"连接WebSocket | 服务器:{serverUri}");
                 await webSocket.ConnectAsync(serverUri, connectToken);
 
-                LogManager.LogInfo($"WebSocket连接已建立");
+                // 🔥 优化：记录连接耗时
+                LogManager.LogDebug($"连接成功 | 协议:{(serverUri.Scheme == "wss" ? "WSS" : "WS")}");
 
                 byte[] dataBytes = Encoding.UTF8.GetBytes(jsonData);
                 var sendToken = new CancellationTokenSource(TimeSpan.FromSeconds(15)).Token;
@@ -205,7 +211,7 @@ namespace TailInstallationSystem
                     true,
                     sendToken);
 
-                LogManager.LogInfo($"数据已发送至服务器，数据大小: {dataBytes.Length} 字节");
+                LogManager.LogDebug($"数据已发送 | 大小:{dataBytes.Length}B");
 
                 var responseBuffer = new byte[1024];
                 var receiveToken = new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token;
@@ -217,46 +223,40 @@ namespace TailInstallationSystem
                 if (result.MessageType == WebSocketMessageType.Text)
                 {
                     string serverResponse = Encoding.UTF8.GetString(responseBuffer, 0, result.Count);
-                    LogManager.LogInfo($"服务器响应: {serverResponse}");
 
-                    // 修改响应判断逻辑 - 针对不同测试服务器
                     if (IsSuccessfulResponse(serverResponse, serverUri))
                     {
-                        LogManager.LogInfo($"服务器确认数据接收成功: {barcode}");
                         return true;
                     }
                     else
                     {
-                        LogManager.LogWarning($"服务器响应异常: {serverResponse}");
                         return false;
                     }
                 }
                 else
                 {
-                    LogManager.LogInfo($"数据发送成功（无文本响应）: {barcode}");
+                    LogManager.LogDebug($"数据发送成功 | 条码:{barcode} | 无文本响应");
                     return true;
                 }
             }
             catch (WebSocketException wsEx)
             {
-                LogManager.LogError($"WebSocket异常: {wsEx.Message}，条码: {barcode}");
-                LogManager.LogError($"WebSocket错误代码: {wsEx.WebSocketErrorCode}");
+                LogManager.LogError($"WebSocket异常 | 条码:{barcode} | 错误:{wsEx.Message} | 错误代码:{wsEx.WebSocketErrorCode}");
                 return false;
             }
             catch (TimeoutException timeEx)
             {
-                LogManager.LogError($"WebSocket连接超时: {timeEx.Message}，条码: {barcode}");
+                LogManager.LogError($"WebSocket超时 | 条码:{barcode} | 错误:{timeEx.Message}");
                 return false;
             }
             catch (OperationCanceledException cancelEx)
             {
-                LogManager.LogError($"WebSocket操作被取消: {cancelEx.Message}，条码: {barcode}");
+                LogManager.LogError($"WebSocket取消 | 条码:{barcode} | 错误:{cancelEx.Message}");
                 return false;
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"WebSocket上传异常: {ex.Message}，条码: {barcode}");
-                LogManager.LogError($"异常类型: {ex.GetType().Name}");
+                LogManager.LogError($"WebSocket上传异常 | 条码:{barcode} | 类型:{ex.GetType().Name} | 错误:{ex.Message}");
                 return false;
             }
             finally
@@ -265,13 +265,12 @@ namespace TailInstallationSystem
                 {
                     if (webSocket?.State == WebSocketState.Open)
                     {
-                        // 改进关闭逻辑
                         await CloseWebSocketSafely(webSocket);
                     }
                 }
                 catch (Exception cleanEx)
                 {
-                    LogManager.LogWarning($"关闭WebSocket时异常: {cleanEx.Message}");
+                    LogManager.LogWarning($"关闭WebSocket异常 | 错误:{cleanEx.Message}");
                 }
                 finally
                 {
@@ -280,6 +279,7 @@ namespace TailInstallationSystem
             }
         }
 
+
         /// <summary>
         /// 判断服务器响应是否成功
         /// </summary>
@@ -287,27 +287,31 @@ namespace TailInstallationSystem
         {
             if (string.IsNullOrEmpty(response))
             {
-                LogManager.LogWarning("服务器响应为空");
+                LogManager.LogWarning("上传响应为空");
                 return false;
             }
 
-            // 获取配置的成功关键词
             var successKeywords = _config.Server.SuccessKeywords ?? new[] { "success", "ok", "received", "完成", "成功" };
-            
+
             foreach (var keyword in successKeywords)
             {
                 if (response.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    LogManager.LogInfo($"服务器确认成功，关键词: '{keyword}', 完整响应: {response}");
+                    string successResponse = response.Length > 100 ? response.Substring(0, 100) + "..." : response;
+                    LogManager.LogInfo($"上传确认 | 关键词:'{keyword}' | 响应:{successResponse}");
                     return true;
                 }
             }
 
-            LogManager.LogWarning($"生产服务器响应不匹配预期格式: {response}");
-            LogManager.LogInfo($"期望的成功关键词: {string.Join(", ", successKeywords)}");
-            
+            string failedResponse = response.Length > 200 ? response.Substring(0, 200) + "..." : response;
+            LogManager.LogWarning($"上传验证失败 | 服务器:{serverUri.Host}");
+            LogManager.LogWarning($"  期望: [{string.Join(", ", successKeywords)}]");
+            LogManager.LogWarning($"  实际: {failedResponse}");
+
             return false;
         }
+
+
 
         /// <summary>
         /// 安全关闭WebSocket连接

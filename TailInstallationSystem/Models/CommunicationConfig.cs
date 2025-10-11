@@ -1,4 +1,5 @@
 ﻿using Newtonsoft.Json;
+using System;
 
 namespace TailInstallationSystem.Models
 {
@@ -28,11 +29,12 @@ namespace TailInstallationSystem.Models
         public bool ShowNotifications { get; set; } = true;
         public int ConnectionTimeoutSeconds { get; set; } = 30;
 
-        // 新增：日志优化配置
         public LoggingSettings Logging { get; set; } = new LoggingSettings();
+
+        public WorkMode CurrentWorkMode { get; set; } = WorkMode.FullProcess;
     }
 
-    // 新增：日志配置类
+    // 日志配置类
     public class LoggingSettings
     {
         /// <summary>
@@ -73,19 +75,35 @@ namespace TailInstallationSystem.Models
 
     public class PLCConfig
     {
+        // 基础配置
         public string IP { get; set; } = "192.168.1.88";
         public int Port { get; set; } = 502;
         public byte Station { get; set; } = 1;
-        public string TriggerAddress { get; set; } = "D501";      // 触发地址
-        public string ScanCompleteAddress { get; set; } = "D521";  // 扫码完成
-        public string HeartbeatAddress { get; set; } = "D530";     // 心跳地址
+
+        public string ScanTriggerAddress { get; set; } = "D500";        // PLC通知扫码
+        public string TighteningTriggerAddress { get; set; } = "D501";  // PLC通知读取拧紧数据
+        public string ScanResultAddress { get; set; } = "D520";         // 上位机反馈扫码结果 (1=OK, 2=NG)
+        public string TighteningResultAddress { get; set; } = "D521";   // 上位机反馈拧紧结果 (1=成功, 2=超时)
+        public string HeartbeatAddress { get; set; } = "D530";          // 心跳信号（持续写1）
+
+        // 旧的字段（保留以兼容旧代码，但标记为过时）
+        [Obsolete("请使用 TighteningTriggerAddress")]
+        public string TriggerAddress { get; set; } = "D501";
+
+        [Obsolete("请使用 TighteningResultAddress")]
+        public string ScanCompleteAddress { get; set; } = "D521";
+
+        [Obsolete("已废弃，新协议不使用M寄存器")]
         public string StartSignalAddress { get; set; } = "M100";
+
+        [Obsolete("已废弃，新协议不使用M寄存器")]
         public string ConfirmSignalAddress { get; set; } = "M101";
     }
 
+
     public class ScannerConfig
     {
-        public string IP { get; set; } = "192.168.1.129";
+        public string IP { get; set; } = "192.168.1.74";
         public int Port { get; set; } = 6666;
         public int TimeoutSeconds { get; set; } = 10;
         public int BufferSize { get; set; } = 2048;
@@ -93,16 +111,15 @@ namespace TailInstallationSystem.Models
 
     public class TighteningAxisConfig
     {
-        public string IP { get; set; } = "192.168.0.102";
+        public string IP { get; set; } = "192.168.1.76";
         public int Port { get; set; } = 502;
         public byte Station { get; set; } = 1;
         public int TimeoutSeconds { get; set; } = 10;
 
         // 拧紧轴特定配置
-        public int StatusPollingIntervalMs { get; set; } = 2000; // 🔧 从1000ms增加到2000ms减少轮询频率
+        public int StatusPollingIntervalMs { get; set; } = 2000; //从1000ms增加到2000ms减少轮询频率
         public int MaxOperationTimeoutSeconds { get; set; } = 1200; // 最大操作超时时间
 
-        // 🔧 新增：错误处理和轮询控制配置（不修改设备地址）
         /// <summary>
         /// 启用错误恢复机制
         /// </summary>
@@ -142,7 +159,7 @@ namespace TailInstallationSystem.Models
         public double MinTorque { get; set; } = 0.1;
         public double MaxTorque { get; set; } = 10.0;
 
-        // 关键寄存器地址 - 保持说明书原有地址不变
+        // 关键寄存器地址
         public ModbusRegisterAddresses Registers { get; set; } = new ModbusRegisterAddresses();
     }
     // 拧紧轴Modbus寄存器地址配置
@@ -160,14 +177,13 @@ namespace TailInstallationSystem.Models
         public int LowerLimitTorque { get; set; } = 5002;  // 判断下限扭矩
         public int UpperLimitTorque { get; set; } = 5004;  // 判断上限扭矩
 
-        // 统计相关 - 保持说明书原有地址
+        // 统计相关 
         public int QualifiedCount { get; set; } = 5088;    // 合格数记录
         public int TighteningMode { get; set; } = 5000;    // 紧固模式
 
-        // 角度相关 - 保持说明书原有地址
+        // 角度相关
         public int RealtimeAngle { get; set; } = 5098;     // 实时角度
         
-        // 🔧 新增：用于连接验证的备用地址（不替换原有地址）
         public int TestRegister { get; set; } = 5000;      // 用于连接测试，使用紧固模式地址作为测试
     }
 
@@ -214,5 +230,20 @@ namespace TailInstallationSystem.Models
         RotateAngle = 1000, // 旋转指定角度
         JogForward = 3000,  // 点动运行任务
         JogReverse = 3001   // 点动运行反转
+    }
+
+    /// <summary>
+    /// 工作模式枚举
+    /// </summary>
+    public enum WorkMode
+    {
+        /// <summary>
+        /// 完整流程：接收前3道工序数据 + 工序4合并上传
+        /// </summary>
+        FullProcess = 0,
+        /// <summary>
+        /// 独立模式：仅执行工序4并独立上传（忽略前端数据）
+        /// </summary>
+        Independent = 1
     }
 }

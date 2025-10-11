@@ -62,7 +62,7 @@ namespace TailInstallationSystem.Utils
                         }
                         _currentConfig = config;
                         
-                        // 🔧 新增：应用日志设置
+                        // 应用日志设置
                         ApplyLoggingSettings(config);
                         
                         LogManager.LogInfo("配置文件加载成功");
@@ -122,7 +122,7 @@ namespace TailInstallationSystem.Utils
                 File.WriteAllText(ConfigFile, json);
                 _currentConfig = config;
                 
-                // 🔧 新增：应用日志设置
+                // 应用日志设置
                 ApplyLoggingSettings(config);
                 
                 LogManager.LogInfo("配置文件保存成功");
@@ -230,7 +230,6 @@ namespace TailInstallationSystem.Utils
             }
         }
 
-        // 🔧 修改：确保Logging配置存在
         private static void EnsureSystemSettingsExists(CommunicationConfig config)
         {
             if (config.System == null)
@@ -239,7 +238,6 @@ namespace TailInstallationSystem.Utils
                 LogManager.LogInfo("自动添加了系统设置部分到配置中");
             }
             
-            // 🔧 新增：确保Logging配置存在
             if (config.System.Logging == null)
             {
                 config.System.Logging = new LoggingSettings();
@@ -247,7 +245,7 @@ namespace TailInstallationSystem.Utils
             }
         }
 
-        // 🔧 修改：创建包含完整日志配置的默认配置
+        // 创建包含完整日志配置的默认配置
         private static CommunicationConfig CreateDefaultConfig()
         {
             return new CommunicationConfig
@@ -261,7 +259,7 @@ namespace TailInstallationSystem.Utils
             };
         }
 
-        // 🔧 新增：强制重新生成配置文件（保留现有设置）
+        // 强制重新生成配置文件（保留现有设置）
         public static void RegenerateConfigWithNewFields()
         {
             try
