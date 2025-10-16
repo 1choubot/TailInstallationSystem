@@ -356,38 +356,190 @@ namespace TailInstallationSystem
 
         private async Task<bool> TestTighteningAxisConnection(string ip, int port, byte station)
         {
+            ModbusTcpNet modbusTcpClient = null;
             try
             {
-                var modbusTcpClient = new ModbusTcpNet(ip, port, station);
+                modbusTcpClient = new ModbusTcpNet(ip, port, station);
+                modbusTcpClient.ConnectTimeOut = 5000;
+                modbusTcpClient.ReceiveTimeOut = 3000;
+
                 var connectResult = await Task.Run(() => modbusTcpClient.ConnectServer());
 
-                if (connectResult.IsSuccess)
-                {
-                    // 尝试读取拧紧轴的运行状态寄存器来测试连接
-                    var readResult = await Task.Run(() => modbusTcpClient.ReadInt16("5100", 1));
-                    modbusTcpClient.ConnectClose();
-
-                    if (readResult.IsSuccess)
-                    {
-                        LogManager.LogInfo($"拧紧轴测试读取成功，运行状态值: {readResult.Content[0]}");
-                        return true;
-                    }
-                    else
-                    {
-                        LogManager.LogWarning($"拧紧轴连接成功但读取数据失败: {readResult.Message}");
-                        return false;
-                    }
-                }
-                else
+                if (!connectResult.IsSuccess)
                 {
                     LogManager.LogWarning($"拧紧轴Modbus连接失败: {connectResult.Message}");
                     return false;
                 }
+
+                LogManager.LogInfo("========== 拧紧轴连接测试 ==========");
+                LogManager.LogInfo($"设备地址: {ip}:{port}, 站号:{station}");
+                LogManager.LogInfo("-----------------------------------");
+
+                //  1. 读取运行状态（地址5100，占1个寄存器）
+                var statusResult = await Task.Run(() =>
+                    modbusTcpClient.ReadUInt16("5100", 1));
+
+                if (statusResult.IsSuccess)
+                {
+                    ushort statusValue = statusResult.Content[0];
+                    string statusText = GetTighteningStatusText(statusValue);
+                    LogManager.LogInfo($"运行状态 (5100): {statusValue} (0x{statusValue:X4}) - {statusText}");
+                }
+                else
+                {
+                    LogManager.LogWarning($"读取运行状态失败: {statusResult.Message}");
+                }
+
+                //  2. 读取错误代码（地址5096，占2个寄存器 - 32位整数）
+                var errorResult = await Task.Run(() =>
+                    modbusTcpClient.ReadUInt16("5096", 1));
+
+                if (errorResult.IsSuccess)
+                {
+                    ushort errorCode = errorResult.Content[0];
+                    LogManager.LogInfo($"错误代码 (5096): {errorCode} {(errorCode == 0 ? "- 无错误" : $"- 错误码: 0x{errorCode:X4}")}");
+                }
+
+                //  3. 读取紧固模式（地址5000，占2个寄存器 - 32位浮点数）
+                var modeResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5000", 2));
+
+                if (modeResult.IsSuccess)
+                {
+                    float mode = ConvertToFloat(modeResult.Content);
+
+                    // 紧固模式是特殊编码（如 11000-42222），显示原始浮点值
+                    LogManager.LogInfo($"紧固模式 (5000): {mode:F0}");
+                }
+
+                LogManager.LogInfo("-----------------------------------");
+                LogManager.LogInfo("扭矩配置参数：");
+
+                //  4. 读取下限扭矩（地址5002，占2个寄存器）
+                var lowerLimitResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5002", 2));
+
+                if (lowerLimitResult.IsSuccess)
+                {
+                    float lowerLimit = ConvertToFloat(lowerLimitResult.Content);
+
+                    if (IsValidTorqueValue(lowerLimit))
+                    {
+                        LogManager.LogInfo($"  下限扭矩 (5002): {lowerLimit:F2} Nm");
+                    }
+                    else
+                    {
+                        LogManager.LogWarning($"  下限扭矩 (5002): {lowerLimit:F4} Nm (可能未配置)");
+                    }
+                }
+
+                //  5. 读取上限扭矩（地址5004）
+                var upperLimitResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5004", 2));
+
+                if (upperLimitResult.IsSuccess)
+                {
+                    float upperLimit = ConvertToFloat(upperLimitResult.Content);
+
+                    if (IsValidTorqueValue(upperLimit))
+                    {
+                        LogManager.LogInfo($"  上限扭矩 (5004): {upperLimit:F2} Nm");
+                    }
+                    else
+                    {
+                        LogManager.LogWarning($"  上限扭矩 (5004): {upperLimit:F4} Nm (可能未配置)");
+                    }
+                }
+
+                //  6. 读取目标扭矩（地址5006）
+                var targetResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5006", 2));
+
+                if (targetResult.IsSuccess)
+                {
+                    float target = ConvertToFloat(targetResult.Content);
+
+                    if (IsValidTorqueValue(target))
+                    {
+                        LogManager.LogInfo($"  目标扭矩 (5006): {target:F2} Nm");
+                    }
+                    else
+                    {
+                        LogManager.LogWarning($"  目标扭矩 (5006): {target:F4} Nm (可能未配置)");
+                    }
+                }
+
+                LogManager.LogInfo("-----------------------------------");
+
+                //  7. 读取统计数据
+                var qualifiedCountResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5088", 2));
+
+                if (qualifiedCountResult.IsSuccess)
+                {
+                    float qualifiedCount = ConvertToFloat(qualifiedCountResult.Content);
+                    LogManager.LogInfo($"合格数记录 (5088): {qualifiedCount:F0}");
+                }
+
+                //  8. 读取实时扭矩（地址5094）
+                var realtimeTorqueResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5094", 2));
+
+                if (realtimeTorqueResult.IsSuccess)
+                {
+                    float realtimeTorque = ConvertToFloat(realtimeTorqueResult.Content);
+                    LogManager.LogInfo($"实时扭矩 (5094): {realtimeTorque:F2} Nm");
+                }
+
+                //  9. 读取实时角度（地址5098）
+                var realtimeAngleResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5098", 2));
+
+                if (realtimeAngleResult.IsSuccess)
+                {
+                    float realtimeAngle = ConvertToFloat(realtimeAngleResult.Content);
+                    LogManager.LogInfo($"实时角度 (5098): {realtimeAngle:F2}°");
+                }
+
+                LogManager.LogInfo("===================================");
+                LogManager.LogInfo("拧紧轴配置读取完成！");
+
+                return true;
             }
             catch (Exception ex)
             {
                 LogManager.LogError($"拧紧轴连接测试异常: {ex.Message}");
                 return false;
+            }
+            finally
+            {
+                try
+                {
+                    modbusTcpClient?.ConnectClose();
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// 获取拧紧轴运行状态文本
+        /// </summary>
+        private string GetTighteningStatusText(ushort statusCode)
+        {
+            switch (statusCode)
+            {
+                case 0: return "空闲";
+                case 1: return "运行中";
+                case 10: return "合格";
+                case 21: return "小于下限扭矩";
+                case 22: return "大于上限扭矩";
+                case 23: return "运行超最上限时间";
+                case 24: return "小于下限角度";
+                case 25: return "大于上限角度";
+                case 0xA000: // 40960
+                    return "未初始化/待配置";
+                default:
+                    return statusCode > 100 ? "错误状态" : "未知状态";
             }
         }
 
@@ -608,5 +760,42 @@ namespace TailInstallationSystem
         {
             return _config;
         }
+        #region 数据转换辅助方法
+
+        /// <summary>
+        /// 将两个16位寄存器转换为32位浮点数
+        /// 根据拧紧轴实际测试，使用 Little-Endian 寄存器顺序
+        /// </summary>
+        private float ConvertToFloat(short[] registers)
+        {
+            if (registers == null || registers.Length < 2)
+                return 0f;
+
+            try
+            {
+                // 寄存器[1]在高位，寄存器[0]在低位
+                uint combined = ((uint)(ushort)registers[1] << 16) | (uint)(ushort)registers[0];
+                byte[] bytes = BitConverter.GetBytes(combined);
+                return BitConverter.ToSingle(bytes, 0);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        /// <summary>
+        /// 验证扭矩值是否在合理范围内
+        /// </summary>
+        private bool IsValidTorqueValue(float torque)
+        {
+            return !float.IsNaN(torque) &&
+                   !float.IsInfinity(torque) &&
+                   torque >= 0f &&
+                   torque <= 50f;
+        }
+
+        #endregion
+
     }
 }

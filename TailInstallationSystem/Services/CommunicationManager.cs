@@ -1,6 +1,7 @@
 ﻿using HslCommunication.ModBus;
 using Newtonsoft.Json;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
@@ -26,9 +27,12 @@ namespace TailInstallationSystem
         private CommunicationConfig _config;
         private bool _disposed = false;
         private readonly object _disposeLock = new object();
+        private readonly ConcurrentDictionary<string, TcpClient> _pcClients = new ConcurrentDictionary<string, TcpClient>();
+        private readonly ConcurrentDictionary<string, NetworkStream> _pcStreams = new ConcurrentDictionary<string, NetworkStream>();
         private int heartbeatLogCounter = 0;
         private bool _lastOperationCompleted = false;
         private static bool _lastCompletionLogged = false;
+        private volatile TaskCompletionSource<bool> _heartbeatTaskCompletion = null;
 
         // 自动重连相关
         private System.Threading.Timer _reconnectTimer;
@@ -103,9 +107,14 @@ namespace TailInstallationSystem
 
         #region 构造函数和初始化
 
-        // 替换整个构造函数：
         public CommunicationManager(CommunicationConfig config = null)
         {
+            lock (_disposeLock)
+            {
+                _isDisposing = false;
+                _disposed = false;
+            }
+
             _config = config ?? ConfigManager.LoadConfig();
             _cancellationTokenSource = new CancellationTokenSource();
 
@@ -188,6 +197,33 @@ namespace TailInstallationSystem
         {
             try
             {
+                // 防御性检查：确保上次释放已完成
+                if (_isDisposing)
+                {
+                    LogManager.LogWarning($"初始化时检测到 _isDisposing=true，等待释放完成...");
+
+                    int waitCount = 0;
+                    while (_isDisposing && waitCount < 30)  // 最多等10秒
+                    {
+                        await Task.Delay(100);
+                        waitCount++;
+
+                        if (waitCount % 10 == 0)
+                        {
+                            LogManager.LogDebug($"等待释放完成...已等待{waitCount * 100}ms");
+                        }
+                    }
+
+                    if (_isDisposing)
+                    {
+                        LogManager.LogError("等待释放超时，强制重置 _isDisposing 标志");
+                        lock (_disposeLock)
+                        {
+                            _isDisposing = false;
+                        }
+                    }
+                }
+
                 LogManager.LogInfo($"开始初始化设备连接... (启动轮询: {startPolling})");
                 // 重新创建取消令牌
                 _cancellationTokenSource?.Dispose();
@@ -286,33 +322,54 @@ namespace TailInstallationSystem
         {
             try
             {
-                if (_config?.TighteningAxis == null)
-                {
-                    LogManager.LogError("拧紧轴配置为空，无法启动状态轮询");
-                    return;
-                }
+                // 1. 先设置标志为 false，让旧任务自然退出
+                isStatusPolling = false;
 
-                // 停止旧的轮询
+                // 2. 取消旧令牌
                 if (_pollingCts != null)
                 {
+                    LogManager.LogDebug("取消旧轮询令牌...");
                     _pollingCts.Cancel();
-                    _pollingCts.Dispose();
+
+                    // 3. 等待旧任务退出（最多1秒）
+                    int waitCount = 0;
+                    while (_pollingCts != null && waitCount < 10)
+                    {
+                        Thread.Sleep(100);
+                        waitCount++;
+                    }
+
+                    if (_pollingCts != null)
+                    {
+                        LogManager.LogWarning("旧轮询任务未退出，强制释放令牌");
+                        _pollingCts.Dispose();
+                    }
+
+                    _pollingCts = null;
                 }
 
+                // 4. 短暂延迟，确保旧任务完全退出
+                Thread.Sleep(100);
+
+                // 5. 创建新令牌
                 _pollingCts = new CancellationTokenSource();
                 isStatusPolling = true;
 
                 Task.Run(async () =>
                 {
-                    LogManager.LogInfo($"拧紧轴状态轮询任务启动");
+                 
+                    var localCts = _pollingCts;  
+                    if (localCts == null)
+                    {
+                        LogManager.LogError("轮询任务启动失败：令牌为null");
+                        return;
+                    }
 
                     while (!_isDisposing && isStatusPolling)
                     {
-                        // 每次循环开始时检查取消令牌
-                        var currentCts = _pollingCts;
-                        if (currentCts == null || currentCts.IsCancellationRequested)
+                        if (localCts.IsCancellationRequested)
                         {
-                            LogManager.LogDebug("轮询任务检测到取消信号，退出循环");
+                            LogManager.LogDebug("轮询任务被取消");
                             break;
                         }
 
@@ -320,54 +377,20 @@ namespace TailInstallationSystem
                         {
                             await PollTighteningAxisStatus();
 
-                            var intervalMs = _config?.TighteningAxis?.StatusPollingIntervalMs ?? 500;
-
-                            // 再次检查取消令牌是否仍然有效
-                            if (currentCts != null && !currentCts.IsCancellationRequested)
-                            {
-                                try
-                                {
-                                    await Task.Delay(intervalMs, currentCts.Token);
-                                }
-                                catch (OperationCanceledException)
-                                {
-                                    LogManager.LogDebug("轮询延时被取消，正常退出");
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                break; // 取消令牌无效，退出循环
-                            }
+                            await Task.Delay(_config.TighteningAxis.StatusPollingIntervalMs, localCts.Token);
                         }
                         catch (OperationCanceledException)
                         {
-                            LogManager.LogDebug("轮询任务被正常取消");
+                            LogManager.LogDebug("轮询延时被取消，正常退出");
                             break;
                         }
                         catch (Exception ex)
                         {
                             LogManager.LogError($"拧紧轴轮询异常: {ex.Message}");
-
-                            // 异常情况下也要检查取消令牌
-                            if (currentCts == null || currentCts.IsCancellationRequested)
-                            {
-                                break;
-                            }
-
-                            // 异常后等待一段时间再继续
-                            try
-                            {
-                                await Task.Delay(1000, currentCts?.Token ?? CancellationToken.None);
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                break;
-                            }
+                            await Task.Delay(5000);
                         }
                     }
 
-                    LogManager.LogInfo("拧紧轴状态轮询任务结束");
                 });
 
                 LogManager.LogInfo($"拧紧轴状态轮询已启动，间隔: {_config.TighteningAxis.StatusPollingIntervalMs}ms");
@@ -377,6 +400,7 @@ namespace TailInstallationSystem
                 LogManager.LogError($"启动拧紧轴状态轮询失败: {ex.Message}");
             }
         }
+
 
         // 停止状态轮询
         private void StopStatusPolling(bool disconnectClient = false)
@@ -561,7 +585,7 @@ namespace TailInstallationSystem
                 }
             }
         }
-      
+
         // 读取拧紧轴数据
         public async Task<TighteningAxisData> ReadTighteningAxisData()
         {
@@ -576,9 +600,10 @@ namespace TailInstallationSystem
                 var registers = _config.TighteningAxis.Registers;
                 var data = new TighteningAxisData();
 
-                // 1. 读取控制命令字
+                // 1. 读取控制命令字（地址5102，单个寄存器）
                 var controlCommandResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadInt16(registers.ControlCommand.ToString(), 1));
+                    tighteningAxisClient.ReadUInt16(registers.ControlCommand.ToString(), 1));
+
                 if (controlCommandResult.IsSuccess)
                 {
                     data.ControlCommand = controlCommandResult.Content[0];
@@ -592,57 +617,37 @@ namespace TailInstallationSystem
                     return null;
                 }
 
-                // 2. 读取运行状态
+                // 2. 读取运行状态（地址5100，单个寄存器）
                 var statusResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadInt16(registers.RunningStatus.ToString(), 1));
+                    tighteningAxisClient.ReadUInt16(registers.RunningStatus.ToString(), 1));
+
                 if (statusResult.IsSuccess)
                 {
                     data.RunningStatusCode = statusResult.Content[0];
                     data.Status = (TighteningStatus)data.RunningStatusCode;
                 }
 
-                // 3. 读取错误代码
+                // 3. 读取错误代码（地址5096，单个寄存器）
                 var errorResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadInt16(registers.ErrorCode.ToString(), 1));
+                    tighteningAxisClient.ReadUInt16(registers.ErrorCode.ToString(), 1));
+
                 if (errorResult.IsSuccess)
                 {
                     data.ErrorCode = errorResult.Content[0];
                     if (data.ErrorCode != 0)
                     {
-                        LogManager.LogDebug($"错误代码(5096): {data.ErrorCode}");
+                        LogManager.LogDebug($"错误代码(5096): 0x{data.ErrorCode:X4}");
                     }
                 }
 
-                // 4. 读取完成扭矩
+                // 4. 读取完成扭矩（地址5092，2个寄存器）
                 var completedTorqueResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadInt16(registers.CompletedTorque.ToString(), 2)); // 读取2个寄存器
+                    tighteningAxisClient.ReadInt16(registers.CompletedTorque.ToString(), 2));
 
                 if (completedTorqueResult.IsSuccess)
                 {
-                    LogManager.LogDebug($"[拧紧轴] 完成扭矩原始数据 | " +
-                       $"寄存器5092[0]:{completedTorqueResult.Content[0]} | " +
-                       $"寄存器5092[1]:{completedTorqueResult.Content[1]}");
-
+                    // 使用正确的字节序转换（寄存器[1]在高位）
                     data.CompletedTorque = ConvertToFloat(completedTorqueResult.Content);
-
-                    LogManager.LogDebug($"[拧紧轴] 扭矩转换结果 | {data.CompletedTorque:F4}Nm");
-
-                    // 添加数据有效性验证
-                    if (!IsValidTorqueValue(data.CompletedTorque))
-                    {
-                        LogManager.LogWarning($"扭矩值异常: {data.CompletedTorque:E}，尝试字节序转换");
-                        data.CompletedTorque = ConvertToFloatWithByteSwap(completedTorqueResult.Content);
-
-                        if (!IsValidTorqueValue(data.CompletedTorque))
-                        {
-                            LogManager.LogError($"字节序转换后扭矩值仍异常: {data.CompletedTorque:E}，设为0");
-                            data.CompletedTorque = 0f;
-                        }
-                        else
-                        {
-                            LogManager.LogInfo($"字节序转换成功，扭矩值: {data.CompletedTorque:F2}Nm");
-                        }
-                    }
 
                     if (data.CompletedTorque > 0.01f)
                     {
@@ -650,92 +655,59 @@ namespace TailInstallationSystem
                     }
                 }
 
-                // 5. 读取实时扭矩
+                // 5. 读取实时扭矩（地址5094）
                 var realtimeTorqueResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.RealtimeTorque.ToString(), 2));
+
                 if (realtimeTorqueResult.IsSuccess)
                 {
                     data.RealtimeTorque = ConvertToFloat(realtimeTorqueResult.Content);
-                    if (!IsValidTorqueValue(data.RealtimeTorque))
-                    {
-                        data.RealtimeTorque = ConvertToFloatWithByteSwap(realtimeTorqueResult.Content);
-                        if (!IsValidTorqueValue(data.RealtimeTorque))
-                        {
-                            data.RealtimeTorque = 0f;
-                        }
-                    }
                 }
 
-                // 6. 读取目标扭矩
+                // 6. 读取目标扭矩（地址5006）
                 var targetTorqueResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.TargetTorque.ToString(), 2));
+
                 if (targetTorqueResult.IsSuccess)
                 {
                     data.TargetTorque = ConvertToFloat(targetTorqueResult.Content);
-                    if (!IsValidTorqueValue(data.TargetTorque))
-                    {
-                        data.TargetTorque = ConvertToFloatWithByteSwap(targetTorqueResult.Content);
-                        if (!IsValidTorqueValue(data.TargetTorque))
-                        {
-                            data.TargetTorque = 2.0f; // 设置合理的默认值
-                        }
-                    }
                 }
 
-                // 7. 读取扭矩下限
+                // 7. 读取扭矩下限（地址5002）
                 var lowerLimitResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.LowerLimitTorque.ToString(), 2));
+
                 if (lowerLimitResult.IsSuccess)
                 {
                     data.LowerLimitTorque = ConvertToFloat(lowerLimitResult.Content);
-                    if (!IsValidTorqueValue(data.LowerLimitTorque))
-                    {
-                        data.LowerLimitTorque = ConvertToFloatWithByteSwap(lowerLimitResult.Content);
-                        if (!IsValidTorqueValue(data.LowerLimitTorque))
-                        {
-                            data.LowerLimitTorque = 1.8f; // 设置合理的默认值
-                        }
-                    }
                 }
 
-                // 8. 读取扭矩上限
+                // 8. 读取扭矩上限（地址5004）
                 var upperLimitResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.UpperLimitTorque.ToString(), 2));
+
                 if (upperLimitResult.IsSuccess)
                 {
                     data.UpperLimitTorque = ConvertToFloat(upperLimitResult.Content);
-                    if (!IsValidTorqueValue(data.UpperLimitTorque))
-                    {
-                        data.UpperLimitTorque = ConvertToFloatWithByteSwap(upperLimitResult.Content);
-                        if (!IsValidTorqueValue(data.UpperLimitTorque))
-                        {
-                            data.UpperLimitTorque = 2.2f; // 设置合理的默认值
-                        }
-                    }
                 }
 
-                // 9. 读取实时角度
+                // 9. 读取实时角度（地址5098）
                 var realtimeAngleResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.RealtimeAngle.ToString(), 2));
+
                 if (realtimeAngleResult.IsSuccess)
                 {
                     data.RealtimeAngle = ConvertToFloat(realtimeAngleResult.Content);
-                    if (!IsValidTorqueValue(data.RealtimeAngle)) // 角度也使用相同的验证逻辑
-                    {
-                        data.RealtimeAngle = ConvertToFloatWithByteSwap(realtimeAngleResult.Content);
-                        if (!IsValidTorqueValue(data.RealtimeAngle))
-                        {
-                            data.RealtimeAngle = 0f;
-                        }
-                    }
                 }
 
-                // 10. 读取合格数记录
+                // 10. 读取合格数记录（地址5088，2个寄存器 - 浮点数）
                 var qualifiedCountResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadInt16(registers.QualifiedCount.ToString(), 1));
+                    tighteningAxisClient.ReadInt16(registers.QualifiedCount.ToString(), 2));
+
                 if (qualifiedCountResult.IsSuccess)
                 {
-                    data.QualifiedCount = qualifiedCountResult.Content[0];
+                    float qualifiedFloat = ConvertToFloat(qualifiedCountResult.Content);
+                    data.QualifiedCount = (int)qualifiedFloat;
                 }
 
                 // 设置时间戳
@@ -758,25 +730,7 @@ namespace TailInstallationSystem
 
             try
             {
-                // 标准方式：高位在前，低位在后
-                uint combined = ((uint)registers[0] << 16) | (uint)(ushort)registers[1];
-                byte[] bytes = BitConverter.GetBytes(combined);
-                return BitConverter.ToSingle(bytes, 0);
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private float ConvertToFloatWithByteSwap(short[] registers)
-        {
-            if (registers == null || registers.Length < 2)
-                return 0f;
-
-            try
-            {
-                // 字节序交换方式：低位在前，高位在后
+                // 拧紧轴格式：寄存器[1]在高位，寄存器[0]在低位
                 uint combined = ((uint)(ushort)registers[1] << 16) | (uint)(ushort)registers[0];
                 byte[] bytes = BitConverter.GetBytes(combined);
                 return BitConverter.ToSingle(bytes, 0);
@@ -787,15 +741,6 @@ namespace TailInstallationSystem
             }
         }
 
-        private bool IsValidTorqueValue(float torque)
-        {
-            // 扭矩值应该在合理范围内：0-50Nm，且不能是NaN或无穷大
-            return !float.IsNaN(torque) &&
-                   !float.IsInfinity(torque) &&
-                   torque >= 0f &&
-                   torque <= 50f &&
-                   Math.Abs(torque) < 1e10; // 避免科学计数法的异常值
-        }
 
         // 等待拧紧操作完成
         public async Task<TighteningAxisData> WaitForTighteningCompletion(int timeoutSeconds = 30)
@@ -865,7 +810,7 @@ namespace TailInstallationSystem
 
                 if (connect.IsSuccess)
                 {
-                    // 使用配置的触发地址进行验证（D501 -> 501）
+                    // 验证连接
                     string testAddress = _config.PLC.TriggerAddress.Replace("D", "");
                     var testResult = await Task.Run(() => busTcpClient.ReadInt16(testAddress, 1));
 
@@ -873,6 +818,18 @@ namespace TailInstallationSystem
                     {
                         connectSuccess_PLC = true;
                         LogManager.LogInfo($"PLC连接成功: {_config.PLC.IP}:{_config.PLC.Port}");
+
+                        // 显式触发状态更新（绕过防抖）
+                        try
+                        {
+                            OnDeviceConnectionChanged?.Invoke("PLC", true);
+                            LogManager.LogDebug("PLC连接状态事件已触发");
+                        }
+                        catch (Exception eventEx)
+                        {
+                            LogManager.LogWarning($"触发PLC连接事件异常: {eventEx.Message}");
+                        }
+
                         return true;
                     }
                     else
@@ -896,7 +853,6 @@ namespace TailInstallationSystem
                 return false;
             }
         }
-
 
         public async Task<bool> CheckPLCTrigger()
         {
@@ -1246,129 +1202,208 @@ namespace TailInstallationSystem
         /// </summary>
         public async Task StartHeartbeat()
         {
-            lock (_heartbeatLock)
+            try
             {
-                if (_isHeartbeatRunning)
-                {
-                    LogManager.LogWarning("心跳信号已在运行，跳过重复启动");
-                    return;
-                }
-            }
-            
-            StopHeartbeat();
-            
-            lock (_heartbeatLock)
-            {
-                _isHeartbeatRunning = true;
-            }
-            
-            _heartbeatCts = new CancellationTokenSource();
-            var token = _heartbeatCts.Token;
-            LogManager.LogInfo($"启动心跳信号 - {_config.PLC.HeartbeatAddress}");
+                LogManager.LogInfo($"准备启动心跳信号 - {_config.PLC.HeartbeatAddress}");
 
-            _ = Task.Run(async () =>
-            {
-                int heartbeatLogCounter = 0;
-                bool hasWrittenHeartbeat = false;
-
-                while (!token.IsCancellationRequested && connectSuccess_PLC && !_isDisposing)
+                // 1. 先停止旧心跳任务并等待完全退出
+                if (_heartbeatCts != null)
                 {
+                    LogManager.LogDebug("检测到旧心跳任务，正在停止...");
+
                     try
                     {
-                        bool writeSuccess = await WritePLCDRegisterQuiet(_config.PLC.HeartbeatAddress, 1);
-                        if (writeSuccess)
+                        // 取消旧令牌
+                        if (!_heartbeatCts.IsCancellationRequested)
                         {
-                            hasWrittenHeartbeat = true;
+                            _heartbeatCts.Cancel();
                         }
 
-                        if (heartbeatLogCounter % 10 == 0)
+                        // 等待旧任务完全退出（最多等待2秒）
+                        if (_heartbeatTaskCompletion != null)
                         {
-                            LogManager.LogDebug($"心跳信号运行中 - 第{heartbeatLogCounter}次");
-                        }
-                        heartbeatLogCounter++;
+                            var waitTask = _heartbeatTaskCompletion.Task;
+                            var timeoutTask = Task.Delay(2000);
+                            var completedTask = await Task.WhenAny(waitTask, timeoutTask);
 
-                        await Task.Delay(300, token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        LogManager.LogDebug("心跳任务正常取消");
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        LogManager.LogError($"心跳发送异常: {ex.Message}");
-                        
-                        if (_isDisposing || !connectSuccess_PLC)
-                        {
-                            break;
-                        }
-                        
-                        try
-                        {
-                            await Task.Delay(1000, token);
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            break;
-                        }
-                    }
-                }
-
-                // 心跳复位逻辑（循环退出后立即执行）
-                if (hasWrittenHeartbeat)
-                {
-                    try
-                    {
-                        if (!connectSuccess_PLC || busTcpClient == null)
-                        {
-                            LogManager.LogDebug("心跳停止：PLC已断开，跳过寄存器复位");
-                            return;
-                        }
-
-                        // 直接调用底层写入，绕过状态检查
-                        if (busTcpClient != null)
-                        {
-                            string numericAddress = _config.PLC.HeartbeatAddress.ToUpper().Replace("D", "");
-                            var result = await Task.Run(() =>
+                            if (completedTask == waitTask)
                             {
-                                try
-                                {
-                                    if (busTcpClient == null) return null;
-                                    return busTcpClient.Write(numericAddress, (short)0);
-                                }
-                                catch
-                                {
-                                    return null;
-                                }
-                            });
-
-                            if (result != null && result.IsSuccess)
-                            {
-                                LogManager.LogInfo("心跳信号已停止并复位寄存器(D530=0)");
+                                LogManager.LogDebug("旧心跳任务已完全退出");
                             }
                             else
                             {
-                                LogManager.LogDebug("心跳复位跳过：PLC连接已断开");
+                                LogManager.LogWarning("等待旧心跳任务退出超时（2秒），强制继续");
+                            }
+                        }
+
+                        _heartbeatCts.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        LogManager.LogDebug($"停止旧心跳异常: {ex.Message}");
+                    }
+
+                    _heartbeatCts = null;
+                    _heartbeatTaskCompletion = null;
+
+                    // 额外等待确保资源释放
+                    await Task.Delay(200);
+                }
+
+                // 2. 设置运行标志
+                lock (_heartbeatLock)
+                {
+                    _isHeartbeatRunning = true;
+                }
+
+                // 3. 创建新的取消令牌和完成标志
+                _heartbeatCts = new CancellationTokenSource();
+                _heartbeatTaskCompletion = new TaskCompletionSource<bool>();
+                var token = _heartbeatCts.Token;
+
+                LogManager.LogInfo($"启动心跳信号 - {_config.PLC.HeartbeatAddress}");
+                // 4. 启动心跳任务
+                _ = Task.Run(async () =>
+                {
+                    int heartbeatLogCounter = 0;
+                    bool hasWrittenHeartbeat = false;
+
+                    try
+                    {
+                        LogManager.LogDebug($"心跳任务已启动 - PLC连接: {connectSuccess_PLC}, Disposing: {_isDisposing}");
+
+                        while (!token.IsCancellationRequested && connectSuccess_PLC && !_isDisposing)
+                        {
+                            try
+                            {
+                                bool writeSuccess = await WritePLCDRegisterQuiet(_config.PLC.HeartbeatAddress, 1);
+
+                                if (writeSuccess)
+                                {
+                                    hasWrittenHeartbeat = true;
+
+                                    // 首次写入成功时记录日志
+                                    if (heartbeatLogCounter == 0)
+                                    {
+                                        LogManager.LogInfo($"心跳信号首次写入成功 - D530=1");
+                                    }
+                                }
+                                else if (heartbeatLogCounter == 0)
+                                {
+                                    // 首次写入失败，记录详细日志
+                                    LogManager.LogWarning($"心跳信号首次写入失败 - PLC连接: {connectSuccess_PLC}");
+                                }
+                                if (heartbeatLogCounter % 10 == 0 && heartbeatLogCounter > 0)
+                                {
+                                    LogManager.LogDebug($"心跳信号运行中 - 第{heartbeatLogCounter}次");
+                                }
+                                heartbeatLogCounter++;
+                                await Task.Delay(300, token);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                LogManager.LogDebug("心跳任务正常取消");
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                LogManager.LogError($"心跳发送异常: {ex.Message}");
+
+                                if (_isDisposing || !connectSuccess_PLC)
+                                {
+                                    break;
+                                }
+
+                                try
+                                {
+                                    await Task.Delay(1000, token);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                        LogManager.LogDebug($"心跳任务主循环退出 - 已写入: {hasWrittenHeartbeat}, 计数: {heartbeatLogCounter}");
+                        // 心跳复位逻辑
+                        if (hasWrittenHeartbeat)
+                        {
+                            try
+                            {
+                                if (!connectSuccess_PLC || busTcpClient == null)
+                                {
+                                    LogManager.LogDebug("心跳停止：PLC已断开，跳过寄存器复位");
+                                    return;
+                                }
+                                if (busTcpClient != null)
+                                {
+                                    string numericAddress = _config.PLC.HeartbeatAddress.ToUpper().Replace("D", "");
+                                    var result = await Task.Run(() =>
+                                    {
+                                        try
+                                        {
+                                            if (busTcpClient == null) return null;
+                                            return busTcpClient.Write(numericAddress, (short)0);
+                                        }
+                                        catch
+                                        {
+                                            return null;
+                                        }
+                                    });
+                                    if (result != null && result.IsSuccess)
+                                    {
+                                        LogManager.LogInfo("心跳信号已停止并复位寄存器(D530=0)");
+                                    }
+                                    else
+                                    {
+                                        LogManager.LogDebug("心跳复位跳过：PLC连接已断开");
+                                    }
+                                }
+                                else
+                                {
+                                    LogManager.LogDebug("心跳复位跳过：PLC客户端已释放");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                LogManager.LogDebug($"心跳寄存器复位异常: {ex.Message}");
                             }
                         }
                         else
                         {
-                            LogManager.LogDebug("心跳复位跳过：PLC客户端已释放");
+                            LogManager.LogInfo("心跳信号已停止（未写入过心跳，无需复位）");
                         }
+
                     }
                     catch (Exception ex)
                     {
-                        LogManager.LogDebug($"心跳寄存器复位异常: {ex.Message}");
+                        LogManager.LogError($"心跳任务异常: {ex.Message}");
                     }
-                }
-                else
+                    finally
+                    {
+                        // 标记任务完成
+                        try
+                        {
+                            _heartbeatTaskCompletion?.TrySetResult(true);
+                            LogManager.LogDebug("心跳任务完全退出");
+                        }
+                        catch (Exception ex)
+                        {
+                            LogManager.LogDebug($"设置心跳任务完成标志异常: {ex.Message}");
+                        }
+                    }
+                }, token);
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"启动心跳信号异常: {ex.Message}");
+                lock (_heartbeatLock)
                 {
-                    LogManager.LogInfo("心跳信号已停止（未写入过心跳，无需复位）");
+                    _isHeartbeatRunning = false;
                 }
-
-            }, token);
+                throw;
+            }
         }
-
 
         /// <summary>
         /// 查询心跳是否正在运行
@@ -1407,52 +1442,77 @@ namespace TailInstallationSystem
         /// </summary>
         public void StopHeartbeat()
         {
-            // 检查状态
-            bool wasRunning;
-            lock (_heartbeatLock)
+            try
             {
-                wasRunning = _isHeartbeatRunning;
-                _isHeartbeatRunning = false;
-            }
-
-            if (!wasRunning)
-            {
-                LogManager.LogDebug("心跳信号未运行，跳过停止操作");
-                return;
-            }
-
-            if (_heartbeatCts != null)
-            {
-                try
+                // 检查状态
+                bool wasRunning;
+                lock (_heartbeatLock)
                 {
-                    if (!_heartbeatCts.IsCancellationRequested)
+                    wasRunning = _isHeartbeatRunning;
+                    _isHeartbeatRunning = false;
+                }
+                if (!wasRunning)
+                {
+                    LogManager.LogDebug("心跳信号未运行，跳过停止操作");
+                    return;
+                }
+                LogManager.LogInfo("正在停止心跳信号...");
+                if (_heartbeatCts != null)
+                {
+                    try
                     {
-                        _heartbeatCts.Cancel();
-                        LogManager.LogDebug("心跳取消令牌已发送");
+                        if (!_heartbeatCts.IsCancellationRequested)
+                        {
+                            _heartbeatCts.Cancel();
+                            LogManager.LogDebug("心跳取消令牌已发送");
+                        }
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        LogManager.LogDebug("心跳取消令牌已被释放");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogManager.LogWarning($"取消心跳任务时异常: {ex.Message}");
+                    }
+                    // 同步等待任务完成（最多500ms）
+                    if (_heartbeatTaskCompletion != null)
+                    {
+                        try
+                        {
+                            bool completed = _heartbeatTaskCompletion.Task.Wait(500);
+                            if (completed)
+                            {
+                                LogManager.LogDebug("心跳任务已确认退出");
+                            }
+                            else
+                            {
+                                LogManager.LogWarning("等待心跳任务退出超时（500ms）");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LogManager.LogDebug($"等待心跳任务完成异常: {ex.Message}");
+                        }
+                    }
+                    try
+                    {
+                        _heartbeatCts.Dispose();
+                        _heartbeatCts = null;
+                        _heartbeatTaskCompletion = null;
+                        LogManager.LogDebug("心跳取消令牌已释放");
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        LogManager.LogDebug("心跳取消令牌已被释放");
                     }
                 }
-                catch (ObjectDisposedException)
-                {
-                    LogManager.LogDebug("心跳取消令牌已被释放");
-                }
-                catch (Exception ex)
-                {
-                    LogManager.LogWarning($"取消心跳任务时异常: {ex.Message}");
-                }
-
-                try
-                {
-                    _heartbeatCts.Dispose();
-                    _heartbeatCts = null;
-                    LogManager.LogDebug("心跳取消令牌已释放");
-                }
-                catch (ObjectDisposedException)
-                {
-                    LogManager.LogDebug("心跳取消令牌已被释放");
-                }
+                LogManager.LogInfo("心跳信号已停止");
             }
-
-            LogManager.LogInfo("心跳信号已停止");
+            catch (Exception ex)
+            {
+                LogManager.LogError($"停止心跳信号异常: {ex.Message}");
+            }
         }
 
 
@@ -1480,12 +1540,22 @@ namespace TailInstallationSystem
                     // 服务端模式
                     try
                     {
+                        // 等待旧资源释放
+                        await Task.Delay(200);
+
                         pcListener = new TcpListener(System.Net.IPAddress.Any, _config.PC.Port);
+
+                        // 设置端口复用选项
+                        pcListener.Server.SetSocketOption(
+                            SocketOptionLevel.Socket,
+                            SocketOptionName.ReuseAddress,
+                            true);
+
                         pcListener.Start();
                         pcServerRunning = true;
                         Interlocked.Exchange(ref pcRetryCount, 0);
                         LogManager.LogInfo($"PC服务端启动成功: 端口{_config.PC.Port}");
-                        
+
                         // 启动客户端接收任务
                         _ = Task.Run(async () =>
                         {
@@ -1497,12 +1567,11 @@ namespace TailInstallationSystem
                                     if (client != null)
                                     {
                                         pcRetryCount = 0;
-                                        
-                                        // 设置PC连接状态为已连接
                                         connectSuccess_PC = true;
                                         OnDeviceConnectionChanged?.Invoke("PC", true);
-                                        
-                                        _ = Task.Run(() => HandlePCClient(client), _cancellationTokenSource.Token);
+
+                                        // 传递CancellationToken
+                                        _ = HandlePCClient(client, _cancellationTokenSource.Token);
                                     }
                                 }
                                 catch (ObjectDisposedException)
@@ -1538,11 +1607,8 @@ namespace TailInstallationSystem
                             }
                             LogManager.LogInfo("PC服务端监听循环已退出");
                         }, _cancellationTokenSource.Token);
-                        
-                        // 服务端状态
+
                         LogManager.LogInfo($"PC服务端运行中... 新连接会被自动处理");
-                        
-                        // 服务端启动成功就返回true
                         return true;
                     }
                     catch (SocketException ex)
@@ -1560,7 +1626,7 @@ namespace TailInstallationSystem
                 }
                 else
                 {
-                    // 客户端模式 - 保持原有逻辑
+                    // 客户端模式
                     if (socket_PC != null)
                     {
                         try { socket_PC.Close(); } catch { }
@@ -1605,7 +1671,8 @@ namespace TailInstallationSystem
             }
         }
 
-        private void HandlePCClient(TcpClient client)
+
+        private async Task HandlePCClient(TcpClient client, CancellationToken cancellationToken)
         {
             string clientEndpoint = "未知客户端";
             try
@@ -1619,9 +1686,15 @@ namespace TailInstallationSystem
                     return;
                 }
 
+                // 添加到活跃连接字典
+                _pcClients.TryAdd(clientEndpoint, client);
+
                 using (client)
                 using (var stream = client.GetStream())
                 {
+                    // 添加到活跃流字典
+                    _pcStreams.TryAdd(clientEndpoint, stream);
+
                     byte[] buffer = new byte[_config.PC.BufferSize];
                     client.ReceiveTimeout = _config.PC.TimeoutSeconds * 1000;
                     client.SendTimeout = _config.PC.TimeoutSeconds * 1000;
@@ -1631,7 +1704,7 @@ namespace TailInstallationSystem
                     int totalBytesRead = 0;
                     var timeout = DateTime.Now.AddSeconds(_config.PC.TimeoutSeconds);
 
-                    while (DateTime.Now < timeout)
+                    while (DateTime.Now < timeout && !cancellationToken.IsCancellationRequested)
                     {
                         if (stream.DataAvailable)
                         {
@@ -1641,22 +1714,28 @@ namespace TailInstallationSystem
                                 receivedData.AddRange(buffer.Take(bytesRead));
                                 totalBytesRead += bytesRead;
 
-                                // 检查是否接收到完整的JSON（简单检查：以}结尾）
                                 string currentData = Encoding.UTF8.GetString(receivedData.ToArray());
                                 if (currentData.TrimEnd().EndsWith("}"))
                                 {
-                                    break; // 接收到完整JSON
+                                    break;
                                 }
                             }
                             else
                             {
-                                break; // 连接关闭
+                                break;
                             }
                         }
                         else
                         {
-                            System.Threading.Thread.Sleep(10); // 短暂等待
+                            await Task.Delay(10, cancellationToken);
                         }
+                    }
+
+                    // 检查是否被取消
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        LogManager.LogInfo($"PC客户端处理被取消: {clientEndpoint}");
+                        return;
                     }
 
                     if (totalBytesRead > 0)
@@ -1669,36 +1748,54 @@ namespace TailInstallationSystem
                             return;
                         }
 
-                        // 增强JSON验证
                         if (!IsValidJsonString(json))
                         {
                             LogManager.LogError($"从 {clientEndpoint} 接收到无效JSON格式数据");
-                            LogManager.LogError($"数据长度: {json.Length}, 前100字符: {json.Substring(0, Math.Min(100, json.Length))}");
                             return;
                         }
 
                         try
                         {
-                            // 验证JSON格式
                             var testParse = JsonConvert.DeserializeObject(json);
                             LogManager.LogInfo($"收到PC工序JSON数据: {json.Substring(0, Math.Min(100, json.Length))}...");
 
-                            LogManager.LogInfo($"准备触发 OnDataReceived 事件，订阅者数量: {OnDataReceived?.GetInvocationList()?.Length ?? 0}");
                             OnDataReceived?.Invoke(json);
-                            LogManager.LogInfo("OnDataReceived 事件已触发");
+
+                            await Task.Delay(50, cancellationToken);
+
+                            var response = new
+                            {
+                                Status = "OK",
+                                Message = "数据已接收",
+                                Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                            };
+
+                            string responseJson = JsonConvert.SerializeObject(response);
+                            byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
+
+                            // 写入前检查取消和流状态
+                            if (stream.CanWrite && !cancellationToken.IsCancellationRequested)
+                            {
+                                await stream.WriteAsync(responseBytes, 0, responseBytes.Length, cancellationToken);
+                                await stream.FlushAsync(cancellationToken);
+                                LogManager.LogInfo($"已发送响应到客户端 {clientEndpoint}: {responseJson}");
+                            }
                         }
                         catch (JsonException ex)
                         {
                             LogManager.LogError($"JSON解析失败: {ex.Message}");
-                            LogManager.LogError($"原始数据: {json}");
 
-                            // 尝试修复JSON（去除可能的控制字符）
                             string cleanedJson = CleanJsonString(json);
                             if (cleanedJson != json && IsValidJsonString(cleanedJson))
                             {
                                 LogManager.LogInfo("JSON清理后重新解析");
                                 OnDataReceived?.Invoke(cleanedJson);
                             }
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            LogManager.LogInfo($"PC客户端数据处理被取消: {clientEndpoint}");
+                            return;
                         }
                     }
                     else
@@ -1707,10 +1804,17 @@ namespace TailInstallationSystem
                     }
                 }
             }
+            catch (OperationCanceledException)
+            {
+                LogManager.LogDebug($"PC客户端处理被取消: {clientEndpoint}");
+            }
             catch (Exception ex)
             {
-                LogManager.LogError($"PC客户端 {clientEndpoint} 数据处理异常: {ex.Message}");
-                LogManager.LogError($"异常堆栈: {ex.StackTrace}");
+                // 不记录取消导致的异常
+                if (!(ex is ObjectDisposedException || ex is InvalidOperationException) || !cancellationToken.IsCancellationRequested)
+                {
+                    LogManager.LogError($"PC客户端 {clientEndpoint} 数据处理异常: {ex.Message}");
+                }
 
                 if (ex is OutOfMemoryException || ex is StackOverflowException)
                 {
@@ -1720,11 +1824,16 @@ namespace TailInstallationSystem
             }
             finally
             {
+                // 清理连接字典
+                _pcClients.TryRemove(clientEndpoint, out _);
+                _pcStreams.TryRemove(clientEndpoint, out _);
+
                 LogManager.LogInfo($"PC客户端 {clientEndpoint} 连接已关闭");
             }
         }
 
-        // 新增辅助方法
+
+        // 辅助方法
         private bool IsValidJsonString(string json)
         {
             if (string.IsNullOrWhiteSpace(json))
@@ -1819,6 +1928,27 @@ namespace TailInstallationSystem
             }
         }
 
+        /// <summary>
+        /// 向PC客户端发送响应消息
+        /// 注意：当前架构下，此方法不会被实际使用，响应在 HandlePCClient 中直接发送
+        /// </summary>
+        public async Task<bool> SendResponseToClient(string productCode, object responseData)
+        {
+            try
+            {
+                // 当前架构下，_pcStreams 字典为空，因为 HandlePCClient 是短连接
+                // 响应直接在 HandlePCClient 方法中发送
+                LogManager.LogDebug($"SendResponseToClient 被调用，但响应已在 HandlePCClient 中发送");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"发送响应失败: {ex.Message}");
+                return false;
+            }
+        }
+
+
         #endregion
 
         #region 扫码枪通讯 
@@ -1827,14 +1957,37 @@ namespace TailInstallationSystem
         {
             try
             {
+                // 先确保旧连接完全释放
                 if (socketCore_Scanner != null)
                 {
-                    try { socketCore_Scanner.Close(); } catch { }
+                    LogManager.LogInfo("检测到旧的扫码枪连接，先进行清理...");
+
+                    connectSuccess_Scanner = false;
+
+                    try
+                    {
+                        if (socketCore_Scanner.Connected)
+                        {
+                            socketCore_Scanner.Shutdown(SocketShutdown.Both);
+                        }
+                        socketCore_Scanner.Close();
+                    }
+                    catch (Exception cleanEx)
+                    {
+                        LogManager.LogDebug($"清理旧扫码枪连接异常: {cleanEx.Message}");
+                    }
+
                     socketCore_Scanner = null;
+
+                    // 等待旧接收任务退出
+                    await Task.Delay(300);
+                    LogManager.LogInfo("旧扫码枪连接已清理，等待300ms");
                 }
+
                 socketCore_Scanner = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 socketCore_Scanner.ReceiveTimeout = _config.Scanner.TimeoutSeconds * 1000;
                 socketCore_Scanner.SendTimeout = _config.Scanner.TimeoutSeconds * 1000;
+
                 using (var timeoutCts = new CancellationTokenSource(_config.Scanner.TimeoutSeconds * 1000))
                 using (var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(
                     timeoutCts.Token, _cancellationTokenSource.Token))
@@ -1842,11 +1995,18 @@ namespace TailInstallationSystem
                     var connectTask = socketCore_Scanner.ConnectAsync(_config.Scanner.IP, _config.Scanner.Port);
                     var timeoutTask = Task.Delay(_config.Scanner.TimeoutSeconds * 1000, combinedCts.Token);
                     var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+
                     if (completedTask == connectTask && !connectTask.IsFaulted && socketCore_Scanner.Connected)
                     {
+                        // 先设置状态再启动接收任务
                         connectSuccess_Scanner = true;
                         LogManager.LogInfo($"扫码枪连接成功: {_config.Scanner.IP}:{_config.Scanner.Port}");
+                        // 延迟启动接收任务，确保状态稳定
+                        await Task.Delay(100);
+
+                        // 启动接收任务
                         _ = Task.Run(() => ReceiveScannerData(_cancellationTokenSource.Token), _cancellationTokenSource.Token);
+
                         return true;
                     }
                     else
@@ -1870,15 +2030,23 @@ namespace TailInstallationSystem
             }
         }
 
+
         private async Task ReceiveScannerData(CancellationToken cancellationToken)
         {
             try
             {
-                while (connectSuccess_Scanner && socketCore_Scanner != null && socketCore_Scanner.Connected && !cancellationToken.IsCancellationRequested)
+                // 循环条件增加取消检查
+                while (connectSuccess_Scanner &&
+                       socketCore_Scanner != null &&
+                       socketCore_Scanner.Connected &&
+                       !cancellationToken.IsCancellationRequested)
                 {
                     try
                     {
-                        int received = await socketCore_Scanner.ReceiveAsync(new ArraySegment<byte>(buffer_Scanner), SocketFlags.None);
+                        int received = await socketCore_Scanner.ReceiveAsync(
+                            new ArraySegment<byte>(buffer_Scanner),
+                            SocketFlags.None);
+
                         if (received > 0)
                         {
                             string barcode = Encoding.UTF8.GetString(buffer_Scanner, 0, received).Trim();
@@ -1896,32 +2064,54 @@ namespace TailInstallationSystem
                     }
                     catch (ObjectDisposedException)
                     {
-                        LogManager.LogInfo("扫码枪Socket已被释放");
+                        // 静默处理Dispose异常（正常关闭）
+                        LogManager.LogDebug("扫码枪Socket已被释放");
                         break;
                     }
                     catch (SocketException ex)
                     {
-                        LogManager.LogError($"扫码枪Socket异常: {ex.Message}");
+                        // 区分取消和真实错误
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            LogManager.LogDebug("扫码枪接收任务被取消");
+                        }
+                        else
+                        {
+                            LogManager.LogError($"扫码枪Socket异常: {ex.Message}");
+                        }
                         break;
                     }
                     catch (Exception ex) when (!(ex is OutOfMemoryException || ex is StackOverflowException))
                     {
-                        LogManager.LogError($"接收扫码数据异常: {ex.Message}");
+                        // 不记录取消导致的异常
+                        if (!cancellationToken.IsCancellationRequested)
+                        {
+                            LogManager.LogError($"接收扫码数据异常: {ex.Message}");
+                        }
                         break;
                     }
                 }
             }
             catch (OperationCanceledException)
             {
-                LogManager.LogInfo("扫码枪数据接收任务被取消");
+                LogManager.LogDebug("扫码枪数据接收任务被正常取消");
             }
             finally
             {
-                connectSuccess_Scanner = false;
-                OnDeviceConnectionChanged?.Invoke("Scanner", false);
-                LogManager.LogWarning("扫码枪数据接收线程已停止");
+                // 只有在非取消情况下才更新状态
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    connectSuccess_Scanner = false;
+                    OnDeviceConnectionChanged?.Invoke("Scanner", false);
+                    LogManager.LogWarning("扫码枪数据接收线程已停止");
+                }
+                else
+                {
+                    LogManager.LogDebug("扫码枪接收任务正常退出（系统停止）");
+                }
             }
         }
+
 
         /// <summary>
         /// 发送扫码指令
@@ -2104,7 +2294,10 @@ namespace TailInstallationSystem
 
         protected virtual void Dispose(bool disposing)
         {
-            if (_isDisposing || !disposing) return;
+            if (_isDisposing || !disposing)
+            {
+                return;
+            }
 
             bool lockTaken = false;
             try
@@ -2116,39 +2309,55 @@ namespace TailInstallationSystem
                     return;
                 }
 
-                if (_disposed) return;
-                _isDisposing = true; 
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _isDisposing = true;
 
                 LogManager.LogInfo("开始释放通讯管理器资源...");
 
+                // 1. 停止自动重连机制
                 StopAutoReconnect();
-                // 1.先停止心跳（心跳任务会检测 _isDisposing）
-                StopHeartbeat();
 
-                // 2. 取消所有任务
+                // 2. 取消所有异步操作
                 try
                 {
                     _cancellationTokenSource?.Cancel();
                 }
                 catch (ObjectDisposedException) { }
 
-                // 3. 重置连接状态（防止新操作）
+                // 3. 停止心跳信号
+                StopHeartbeat();
+
+                // 4. 重置连接状态（防止新操作）
                 connectSuccess_PLC = false;
                 connectSuccess_PC = false;
                 connectSuccess_Scanner = false;
                 connectSuccess_TighteningAxis = false;
 
-                // 4.确保心跳任务完全退出
+                // 5. 重置状态防抖标志
+                lock (_statusLock)
+                {
+                    _lastPLCStatus = false;
+                    _lastScannerStatus = false;
+                    _lastTighteningStatus = false;
+                    _lastPCStatus = false;
+                    LogManager.LogInfo("状态防抖标志已重置");
+                }
+
+                // 6. 确保心跳任务完全退出（增加等待时间）
                 try
                 {
                     Thread.Sleep(2000);  // 从1秒增加到2秒
                 }
                 catch (ThreadInterruptedException) { }
 
-                // 5. 最后关闭连接
+                // 7. 最后关闭所有连接
                 SafeCloseAllConnections();
 
-                // 6. 释放取消令牌
+                // 8. 释放取消令牌
                 try
                 {
                     _cancellationTokenSource?.Dispose();
@@ -2160,14 +2369,20 @@ namespace TailInstallationSystem
                 }
 
                 LogManager.LogInfo("通讯管理器资源已安全释放");
+
+                LogManager.LogInfo("重置释放标志 _isDisposing → false");
+                _isDisposing = false;  
             }
             catch (Exception ex)
             {
                 LogManager.LogError($"释放通讯管理器资源时发生异常: {ex.Message}");
+
+                _isDisposing = false;  
             }
             finally
             {
                 _disposed = true;
+
                 if (lockTaken)
                 {
                     _disposeSemaphore.Release();
@@ -2175,13 +2390,15 @@ namespace TailInstallationSystem
             }
         }
 
+
+
         private void SafeCloseAllConnections()
         {
             // 先停止拧紧轴轮询
             try
             {
-                isStatusPolling = false;  // 立即停止轮询标记
-                StopStatusPolling(true); // 停止状态轮询
+                isStatusPolling = false;
+                StopStatusPolling(true);
             }
             catch (Exception ex)
             {
@@ -2202,7 +2419,7 @@ namespace TailInstallationSystem
                 LogManager.LogError($"关闭PLC连接异常: {ex.Message}");
             }
 
-            // 拧紧轴连接 - 确保完全关闭
+            // 拧紧轴连接
             try
             {
                 if (tighteningAxisClient != null)
@@ -2217,59 +2434,135 @@ namespace TailInstallationSystem
                 LogManager.LogError($"关闭拧紧轴连接异常: {ex.Message}");
             }
 
-            // PC连接
+            // PC连接优化
             try
             {
+                // 1. 先关闭所有活跃客户端连接
+                foreach (var clientPair in _pcClients.ToArray())
+                {
+                    try
+                    {
+                        var client = clientPair.Value;
+                        if (client != null && client.Connected)
+                        {
+                            client.Client.Shutdown(SocketShutdown.Both);
+                            client.Close();
+                            LogManager.LogDebug($"已关闭PC客户端连接: {clientPair.Key}");
+                        }
+                    }
+                    catch (Exception clientEx)
+                    {
+                        LogManager.LogDebug($"关闭PC客户端异常: {clientEx.Message}");
+                    }
+                }
+                _pcClients.Clear();
+                _pcStreams.Clear();
+
+                // 2. 停止监听器
                 if (pcListener != null)
                 {
                     pcServerRunning = false;
-                    pcListener.Stop();
+
+                    try
+                    {
+                        // 显式关闭底层Socket
+                        if (pcListener.Server != null)
+                        {
+                            pcListener.Server.Close();
+                        }
+                        pcListener.Stop();
+                    }
+                    catch (Exception stopEx)
+                    {
+                        LogManager.LogDebug($"停止PC监听器异常: {stopEx.Message}");
+                    }
+
                     pcListener = null;
+                    LogManager.LogInfo("PC监听器已停止");
                 }
 
+                // 3. 关闭旧的Socket连接
                 if (socket_PC != null)
                 {
-                    if (socket_PC.Connected)
+                    try
                     {
-                        try
+                        if (socket_PC.Connected)
                         {
                             socket_PC.Shutdown(SocketShutdown.Both);
-                            Thread.Sleep(100);
                         }
-                        catch { }
                     }
+                    catch { }
+
                     socket_PC.Close();
                     socket_PC = null;
                 }
+
+                // 4. 等待端口释放
+                Thread.Sleep(500);
+                LogManager.LogInfo("PC连接资源已释放（等待500ms）");
             }
             catch (Exception ex)
             {
                 LogManager.LogError($"关闭PC连接异常: {ex.Message}");
             }
 
-            // 扫码枪连接
+            // Scanner连接优化
             try
             {
                 if (socketCore_Scanner != null)
                 {
-                    if (socketCore_Scanner.Connected)
+                    // 先设置状态避免接收任务继续运行
+                    connectSuccess_Scanner = false;
+
+                    try
                     {
-                        try
+                        if (socketCore_Scanner.Connected)
                         {
-                            socketCore_Scanner.Shutdown(SocketShutdown.Both);
-                            Thread.Sleep(100);
+                            try
+                            {
+                                socketCore_Scanner.Shutdown(SocketShutdown.Both);
+                            }
+                            catch (SocketException shutdownEx)
+                            {
+                                // Socket可能已断开，忽略此异常
+                                LogManager.LogDebug($"Scanner Shutdown异常（正常）: {shutdownEx.SocketErrorCode}");
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                                LogManager.LogDebug("Scanner Socket已被释放");
+                            }
                         }
-                        catch { }
                     }
-                    socketCore_Scanner.Close();
+                    catch (Exception innerEx)
+                    {
+                        LogManager.LogDebug($"检查Scanner连接状态异常: {innerEx.Message}");
+                    }
+
+                    // 关闭Socket时也增加保护
+                    try
+                    {
+                        socketCore_Scanner.Close();
+                    }
+                    catch (Exception closeEx)
+                    {
+                        LogManager.LogDebug($"关闭Scanner Socket异常: {closeEx.Message}");
+                    }
+
                     socketCore_Scanner = null;
+
+                    // 等待接收任务退出
+                    Thread.Sleep(200);
+                    LogManager.LogInfo("扫码枪连接已关闭（等待200ms）");
                 }
             }
             catch (Exception ex)
             {
                 LogManager.LogError($"关闭扫码枪连接异常: {ex.Message}");
             }
+
+
         }
+
 
         ~CommunicationManager()
         {

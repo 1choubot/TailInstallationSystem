@@ -133,6 +133,21 @@ namespace TailInstallationSystem.View
 
                 if (result == DialogResult.Yes)
                 {
+                    // 清空产品数据缓存，防止旧模式数据污染
+                    if (controller != null)
+                    {
+                        try
+                        {
+                            // 调用控制器的清空缓存方法
+                            controller.ClearProductDataBuffers();
+                            LogManager.LogInfo("工作模式切换：已清空产品数据缓存");
+                        }
+                        catch (Exception clearEx)
+                        {
+                            LogManager.LogWarning($"清空产品缓存时异常: {clearEx.Message}");
+                        }
+                    }
+
                     // 保存配置
                     var config = ConfigManager.GetCurrentConfig();
                     config.System.CurrentWorkMode = newMode;
@@ -168,6 +183,7 @@ namespace TailInstallationSystem.View
                 AntdUI.Message.error(this.FindForm(), $"切换失败: {ex.Message}", autoClose: 3);
             }
         }
+
 
         /// <summary>
         /// 更新工作模式标签显示
@@ -234,12 +250,17 @@ namespace TailInstallationSystem.View
         {
             try
             {
+                currentStatusLabel.Text = "状态: 准备启动系统（等待资源就绪）...";
+                UpdateProgress(5);
+                await Task.Delay(100);
+
                 UpdateProgress(10);
 
                 // 先初始化设备连接
                 if (commManager != null)
                 {
                     LogManager.LogInfo("开始初始化设备连接...");
+                    currentStatusLabel.Text = "状态: 初始化设备连接中...";
                     bool connectResult = await commManager.InitializeConnections();
                     if (!connectResult)
                     {
@@ -248,9 +269,24 @@ namespace TailInstallationSystem.View
                         UpdateProgress(0);
                         return;
                     }
+
+                    // 强制刷新所有设备状态显示
+                    await Task.Delay(100); // 等待事件传播
+
+                    UpdateDeviceStatus("PLC",
+                        commManager.IsPLCConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected);
+                    UpdateDeviceStatus("PC",
+                        commManager.IsPCConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected);
+                    UpdateDeviceStatus("Scanner",
+                        commManager.IsScannerConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected);
+                    UpdateDeviceStatus("TighteningAxis",
+                        commManager.IsTighteningAxisConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected);
+
+                    LogManager.LogInfo("设备状态UI已强制刷新");
                 }
 
-                UpdateProgress(30); // 可选：调整进度显示更细致
+                UpdateProgress(30);
+                currentStatusLabel.Text = "状态: 启动心跳信号...";
                 if (commManager != null && commManager.IsPLCConnected)
                 {
                     try
@@ -261,7 +297,7 @@ namespace TailInstallationSystem.View
                     catch (Exception heartbeatEx)
                     {
                         LogManager.LogWarning($"心跳启动失败: {heartbeatEx.Message}，系统将继续启动");
-                        MessageBox.Show("心跳信号启动失败，但系统将继续运行", "警告", 
+                        MessageBox.Show("心跳信号启动失败，但系统将继续运行", "警告",
                              MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                 }
@@ -277,8 +313,17 @@ namespace TailInstallationSystem.View
 
                 StartStatusMonitoring();
 
-                currentStatusLabel.Text = "状态: 系统运行中";
-
+                var currentMode = controller.GetCurrentWorkMode();
+                if (currentMode == Models.WorkMode.Independent)
+                {
+                    currentBarcodeLabel.Text = "当前产品: 等待扫码（独立模式）...";
+                    currentStatusLabel.Text = "状态: 系统运行中（独立模式）- 等待扫码";
+                }
+                else
+                {
+                    currentBarcodeLabel.Text = "当前产品: 等待产品数据...";
+                    currentStatusLabel.Text = "状态: 系统运行中 - 等待产品数据";
+                }
                 LogManager.LogInfo("系统启动成功");
             }
             catch (Exception ex)
@@ -299,12 +344,15 @@ namespace TailInstallationSystem.View
         }
 
 
+
         private async void btnStop_Click(object sender, EventArgs e)
         {
             try
             {
+                currentStatusLabel.Text = "状态: 正在停止系统（请稍候）...";
                 UpdateProgress(50);
-
+                await Task.Delay(100); // 确保UI更新
+                currentStatusLabel.Text = "状态: 停止主工作循环...";
                 StopStatusMonitoring();
 
                 // 添加null检查
@@ -340,9 +388,10 @@ namespace TailInstallationSystem.View
                 UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
 
-                currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
+                currentBarcodeLabel.Text = "当前产品: 系统已停止";
                 currentStatusLabel.Text = "状态: 系统已停止";
-
+                await Task.Delay(200);
+                currentStatusLabel.Text = "状态: 系统已停止（可重新启动）";
                 LogManager.LogInfo("系统已停止");
             }
             catch (Exception ex)
@@ -367,6 +416,7 @@ namespace TailInstallationSystem.View
 
             if (result == DialogResult.Yes)
             {
+                currentStatusLabel.Text = "状态: 紧急停止中...";
                 // 立即停止定时器！
                 StopStatusMonitoring();
 
@@ -392,9 +442,8 @@ namespace TailInstallationSystem.View
                 UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected); 
                 UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
 
-                currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
+                currentBarcodeLabel.Text = "当前产品: 紧急停止";
                 currentStatusLabel.Text = "状态: 紧急停止";
-
                 LogManager.LogWarning("系统紧急停止");
             }
         }
