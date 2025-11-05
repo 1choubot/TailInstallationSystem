@@ -67,12 +67,21 @@ namespace TailInstallationSystem
         }
 
         /// <summary>
-        /// 保存产品数据 - 统一使用当前工序条码
+        /// 保存产品数据 
         /// </summary>
-        public async Task<bool> SaveProductData(string currentBarcode, string[] processDataArray,
-            string tailProcessData, string completeData)
+        /// <param name="barcode">产品条码</param>
+        /// <param name="tailProcessData">工序4数据（JSON字符串）</param>
+        /// <param name="completeData">完整数据（仅包含工序4的JSON数组）</param>
+        /// <param name="isNG">是否NG产品</param>
+        /// <param name="ngProcessId">NG工序ID（仅工序4会传"14"）</param>
+        public async Task<bool> SaveProductData(
+            string barcode,
+            string tailProcessData,
+            string completeData,
+            bool isNG = false,
+            string ngProcessId = null)
         {
-            if (string.IsNullOrWhiteSpace(currentBarcode))
+            if (string.IsNullOrWhiteSpace(barcode))
             {
                 LogManager.LogError("产品条码不能为空");
                 return false;
@@ -80,48 +89,71 @@ namespace TailInstallationSystem
 
             return await ExecuteWithContext(async context =>
             {
-                LogManager.LogInfo($"开始保存当前工序数据: {currentBarcode}");
+                LogManager.LogInfo($"开始保存工序4数据: {barcode}");
 
                 var existingProduct = await context.ProductData
-                    .FirstOrDefaultAsync(p => p.Barcode == currentBarcode);
+                    .FirstOrDefaultAsync(p => p.Barcode == barcode);
 
                 if (existingProduct != null)
                 {
-                    LogManager.LogInfo($"更新现有产品记录: {currentBarcode}");
-                    existingProduct.Process1_Data = processDataArray.Length > 0 ? processDataArray[0] : existingProduct.Process1_Data;
-                    existingProduct.Process2_Data = processDataArray.Length > 1 ? processDataArray[1] : existingProduct.Process2_Data;
-                    existingProduct.Process3_Data = processDataArray.Length > 2 ? processDataArray[2] : existingProduct.Process3_Data;
+                    LogManager.LogInfo($"更新现有产品记录: {barcode}");
+
+                    // 仅更新工序4数据
                     existingProduct.Process4_Data = tailProcessData;
                     existingProduct.CompleteData = completeData;
                     existingProduct.CompletedTime = DateTime.Now;
                     existingProduct.IsCompleted = true;
                     existingProduct.IsUploaded = false;
+
+                    // 设置NG标识
+                    existingProduct.IsNG = isNG;
+                    existingProduct.NGProcessId = ngProcessId;
+
                     context.Entry(existingProduct).State = EntityState.Modified;
                 }
                 else
                 {
-                    LogManager.LogInfo($"创建新的产品记录: {currentBarcode}");
+                    LogManager.LogInfo($"创建新的产品记录: {barcode}");
                     var product = new ProductData
                     {
-                        Barcode = currentBarcode,
-                        Process1_Data = processDataArray.Length > 0 ? processDataArray[0] : null,
-                        Process2_Data = processDataArray.Length > 1 ? processDataArray[1] : null,
-                        Process3_Data = processDataArray.Length > 2 ? processDataArray[2] : null,
+                        Barcode = barcode,
+
+                        Process1_Data = null,
+                        Process2_Data = null,
+                        Process3_Data = null,
+
+                        // 仅保存工序4数据
                         Process4_Data = tailProcessData,
                         CompleteData = completeData,
+
                         CreatedTime = DateTime.Now,
                         CompletedTime = DateTime.Now,
                         IsCompleted = true,
-                        IsUploaded = false
+                        IsUploaded = false,
+
+                        // 设置NG标识
+                        IsNG = isNG,
+                        NGProcessId = ngProcessId
                     };
                     context.ProductData.Add(product);
                 }
 
                 await context.SaveChangesAsync();
-                LogManager.LogInfo($"当前工序数据保存成功: {currentBarcode}");
+
+                // 增强日志输出
+                if (isNG)
+                {
+                    LogManager.LogWarning($"UNPASS产品数据保存成功: {barcode} (工序{ngProcessId} UNPASS)");
+                }
+                else
+                {
+                    LogManager.LogInfo($"PASS产品数据保存成功: {barcode}");
+                }
+
                 return true;
             }, false);
         }
+
 
         /// <summary>
         /// 上传数据到服务器 - 使用扫描条码作为标识
@@ -180,7 +212,6 @@ namespace TailInstallationSystem
             }
         }
 
-
         /// <summary>
         /// 通过WebSocket上传数据到服务器
         /// </summary>
@@ -189,7 +220,6 @@ namespace TailInstallationSystem
             ClientWebSocket webSocket = null;
             try
             {
-
                 webSocket = new ClientWebSocket();
                 webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
 
@@ -199,7 +229,6 @@ namespace TailInstallationSystem
                 LogManager.LogDebug($"连接WebSocket | 服务器:{serverUri}");
                 await webSocket.ConnectAsync(serverUri, connectToken);
 
-                // 🔥 优化：记录连接耗时
                 LogManager.LogDebug($"连接成功 | 协议:{(serverUri.Scheme == "wss" ? "WSS" : "WS")}");
 
                 byte[] dataBytes = Encoding.UTF8.GetBytes(jsonData);
@@ -279,7 +308,6 @@ namespace TailInstallationSystem
             }
         }
 
-
         /// <summary>
         /// 判断服务器响应是否成功
         /// </summary>
@@ -311,8 +339,6 @@ namespace TailInstallationSystem
             return false;
         }
 
-
-
         /// <summary>
         /// 安全关闭WebSocket连接
         /// </summary>
@@ -320,26 +346,24 @@ namespace TailInstallationSystem
         {
             try
             {
-                // 先关闭输出流
                 await webSocket.CloseOutputAsync(
-                    WebSocketCloseStatus.NormalClosure, 
-                    "Upload completed", 
+                    WebSocketCloseStatus.NormalClosure,
+                    "Upload completed",
                     CancellationToken.None);
-                
+
                 LogManager.LogInfo("WebSocket输出流已关闭");
 
-                // 尝试接收关闭确认（超时处理）
                 var buffer = new byte[1024];
-                var timeout = new CancellationTokenSource(2000); // 2秒超时
-                
+                var timeout = new CancellationTokenSource(2000);
+
                 try
                 {
                     while (webSocket.State == WebSocketState.CloseSent)
                     {
                         var result = await webSocket.ReceiveAsync(
-                            new ArraySegment<byte>(buffer), 
+                            new ArraySegment<byte>(buffer),
                             timeout.Token);
-                        
+
                         if (result.MessageType == WebSocketMessageType.Close)
                         {
                             LogManager.LogInfo("收到WebSocket关闭确认");
@@ -355,8 +379,7 @@ namespace TailInstallationSystem
             catch (Exception ex)
             {
                 LogManager.LogWarning($"安全关闭WebSocket过程中异常: {ex.Message}");
-                
-                // 如果正常关闭失败，强制中止连接
+
                 try
                 {
                     webSocket.Abort();
@@ -375,20 +398,20 @@ namespace TailInstallationSystem
         {
             await ExecuteWithContext(async context =>
             {
-                LogManager.LogInfo($"开始保存到上传队列: {barcode}");
+            LogManager.LogInfo($"开始保存到上传队列: {barcode}");
 
-                var existingRecord = await context.UploadQueue
-                    .FirstOrDefaultAsync(q => q.Barcode == barcode);
+            var existingRecord = await context.UploadQueue
+                .FirstOrDefaultAsync(q => q.Barcode == barcode);
 
-                if (existingRecord != null)
-                {
-                    LogManager.LogInfo($"更新现有队列记录: {barcode}");
-                    existingRecord.JsonData = jsonData;
-                    existingRecord.LastRetryTime = DateTime.Now;
-                    context.Entry(existingRecord).State = EntityState.Modified;
-                }
-                else
-                {
+            if (existingRecord != null)
+            {
+                LogManager.LogInfo($"更新现有队列记录: {barcode}");
+                existingRecord.JsonData = jsonData;
+                existingRecord.LastRetryTime = DateTime.Now;
+                context.Entry(existingRecord).State = EntityState.Modified;
+            }
+            else
+            {
                     LogManager.LogInfo($"创建新的队列记录: {barcode}");
                     var queueItem = new UploadQueue
                     {
@@ -793,18 +816,22 @@ namespace TailInstallationSystem
         {
             return await _dataService.GetUnuploadedProducts();
         }
+
         public async Task<ProductData> GetProductByBarcode(string barcode)
         {
             return await _dataService.GetProductByBarcode(barcode);
         }
+
         public async Task<List<ProductData>> GetProductDataHistory(int days = 30)
         {
             return await _dataService.GetProductDataHistory(days);
         }
+
         public async Task<List<ProductData>> GetAllProductData()
         {
             return await _dataService.GetAllProductData();
         }
+
         public async Task<List<ProductData>> SearchProductData(
             string barcode = null,
             bool? isCompleted = null,
@@ -814,14 +841,17 @@ namespace TailInstallationSystem
         {
             return await _dataService.SearchProductData(barcode, isCompleted, isUploaded, startDate, endDate);
         }
+
         public async Task<DataService.ProductDataStats> GetProductDataStats()
         {
             return await _dataService.GetProductDataStats();
         }
+
         public async Task<bool> DeleteProductData(long id)
         {
             return await _dataService.DeleteProductData(id);
         }
+
         public async Task<int> DeleteProductDataBatch(List<long> ids)
         {
             return await _dataService.DeleteProductDataBatch(ids);
@@ -839,7 +869,6 @@ namespace TailInstallationSystem
             _dataService?.Dispose();
             LogManager.LogInfo("DataManager已释放");
         }
-
-       
     }
 }
+

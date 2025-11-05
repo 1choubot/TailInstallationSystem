@@ -34,6 +34,15 @@
             this.btnClearLog = new AntdUI.Button();
             this.logTitle = new AntdUI.Label();
             this.dataPanel = new AntdUI.Panel();
+            this.tighteningDataPanel = new AntdUI.Panel();
+            this.lblLastProduct = new AntdUI.Label();
+            this.lblRunningStatus = new AntdUI.Label();
+            this.torqueDivider = new AntdUI.Divider();
+            this.lblTorqueRange = new AntdUI.Label();
+            this.lblCompletedTorque = new AntdUI.Label();
+            this.lblRealtimeTorque = new AntdUI.Label();
+            this.lblTargetTorque = new AntdUI.Label();
+            this.tighteningDataTitle = new AntdUI.Label();
             this.currentProductPanel = new AntdUI.Panel();
             this.progressBar = new AntdUI.Progress();
             this.currentStatusLabel = new AntdUI.Label();
@@ -43,41 +52,34 @@
             this.btnSettings = new AntdUI.Button();
             this.btnStop = new AntdUI.Button();
             this.btnStart = new AntdUI.Button();
-            this.workModeDivider = new AntdUI.Divider();
-            this.workModeLabel = new AntdUI.Label();
-            this.workModeSwitch = new AntdUI.Switch();
-            this.statusCards = new AntdUI.Panel();
-            this.pcStatusCard = new AntdUI.Panel();
-            this.pcIndicator = new AntdUI.Panel();
-            this.pcStatusLabel = new AntdUI.Label();
-            this.pcTitleLabel = new AntdUI.Label();
-            this.screwStatusCard = new AntdUI.Panel();
-            this.tighteningAxisIndicator = new AntdUI.Panel();
-            this.tighteningAxisStatusLabel = new AntdUI.Label();
-            this.screwTitleLabel = new AntdUI.Label();
-            this.scannerStatusCard = new AntdUI.Panel();
-            this.scannerIndicator = new AntdUI.Panel();
-            this.scannerStatusLabel = new AntdUI.Label();
-            this.scannerTitleLabel = new AntdUI.Label();
+            this.statusCards = new System.Windows.Forms.TableLayoutPanel();
             this.plcStatusCard = new AntdUI.Panel();
             this.plcIndicator = new AntdUI.Panel();
             this.plcStatusLabel = new AntdUI.Label();
             this.plcTitleLabel = new AntdUI.Label();
+            this.scannerStatusCard = new AntdUI.Panel();
+            this.scannerIndicator = new AntdUI.Panel();
+            this.scannerStatusLabel = new AntdUI.Label();
+            this.scannerTitleLabel = new AntdUI.Label();
+            this.screwStatusCard = new AntdUI.Panel();
+            this.tighteningAxisIndicator = new AntdUI.Panel();
+            this.tighteningAxisStatusLabel = new AntdUI.Label();
+            this.screwTitleLabel = new AntdUI.Label();
             this.contentPanel.SuspendLayout();
             this.logPanel.SuspendLayout();
             this.dataPanel.SuspendLayout();
+            this.tighteningDataPanel.SuspendLayout();
             this.currentProductPanel.SuspendLayout();
             this.controlPanel.SuspendLayout();
             this.statusCards.SuspendLayout();
-            this.pcStatusCard.SuspendLayout();
-            this.screwStatusCard.SuspendLayout();
-            this.scannerStatusCard.SuspendLayout();
             this.plcStatusCard.SuspendLayout();
+            this.scannerStatusCard.SuspendLayout();
+            this.screwStatusCard.SuspendLayout();
             this.SuspendLayout();
             // 
             // contentPanel
             // 
-            this.contentPanel.BackColor = System.Drawing.Color.White;
+            this.contentPanel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(248)))), ((int)(((byte)(249)))), ((int)(((byte)(250)))));
             this.contentPanel.Controls.Add(this.logPanel);
             this.contentPanel.Controls.Add(this.dataPanel);
             this.contentPanel.Controls.Add(this.controlPanel);
@@ -91,26 +93,32 @@
             // 
             // logPanel
             // 
+            this.logPanel.BackColor = System.Drawing.Color.White;
+            this.logPanel.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(217)))), ((int)(((byte)(217)))), ((int)(((byte)(217)))));
+            this.logPanel.BorderWidth = 1F;
             this.logPanel.Controls.Add(this.logTextBox);
             this.logPanel.Controls.Add(this.btnClearLog);
             this.logPanel.Controls.Add(this.logTitle);
             this.logPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.logPanel.Location = new System.Drawing.Point(500, 220);
             this.logPanel.Name = "logPanel";
+            this.logPanel.Radius = 8;
+            this.logPanel.Shadow = 2;
             this.logPanel.Size = new System.Drawing.Size(551, 479);
             this.logPanel.TabIndex = 3;
             // 
             // logTextBox
             // 
             this.logTextBox.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(250)))), ((int)(((byte)(250)))));
+            this.logTextBox.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.logTextBox.Dock = System.Windows.Forms.DockStyle.Fill;
             this.logTextBox.Font = new System.Drawing.Font("Consolas", 9F);
-            this.logTextBox.Location = new System.Drawing.Point(0, 30);
+            this.logTextBox.Location = new System.Drawing.Point(4, 34);
             this.logTextBox.Multiline = true;
             this.logTextBox.Name = "logTextBox";
             this.logTextBox.ReadOnly = true;
             this.logTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.logTextBox.Size = new System.Drawing.Size(551, 419);
+            this.logTextBox.Size = new System.Drawing.Size(543, 401);
             this.logTextBox.TabIndex = 3;
             // 
             // btnClearLog
@@ -119,9 +127,9 @@
             this.btnClearLog.BorderWidth = 1F;
             this.btnClearLog.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.btnClearLog.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.btnClearLog.Location = new System.Drawing.Point(0, 449);
+            this.btnClearLog.Location = new System.Drawing.Point(4, 435);
             this.btnClearLog.Name = "btnClearLog";
-            this.btnClearLog.Size = new System.Drawing.Size(551, 30);
+            this.btnClearLog.Size = new System.Drawing.Size(543, 40);
             this.btnClearLog.TabIndex = 2;
             this.btnClearLog.Text = "清空日志";
             // 
@@ -130,15 +138,16 @@
             this.logTitle.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(245)))), ((int)(((byte)(245)))));
             this.logTitle.Dock = System.Windows.Forms.DockStyle.Top;
             this.logTitle.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
-            this.logTitle.Location = new System.Drawing.Point(0, 0);
+            this.logTitle.Location = new System.Drawing.Point(4, 4);
             this.logTitle.Name = "logTitle";
             this.logTitle.Padding = new System.Windows.Forms.Padding(10, 0, 0, 0);
-            this.logTitle.Size = new System.Drawing.Size(551, 30);
+            this.logTitle.Size = new System.Drawing.Size(543, 30);
             this.logTitle.TabIndex = 0;
             this.logTitle.Text = "系统日志";
             // 
             // dataPanel
             // 
+            this.dataPanel.Controls.Add(this.tighteningDataPanel);
             this.dataPanel.Controls.Add(this.currentProductPanel);
             this.dataPanel.Dock = System.Windows.Forms.DockStyle.Left;
             this.dataPanel.Location = new System.Drawing.Point(20, 220);
@@ -146,44 +155,170 @@
             this.dataPanel.Size = new System.Drawing.Size(480, 479);
             this.dataPanel.TabIndex = 2;
             // 
+            // tighteningDataPanel
+            // 
+            this.tighteningDataPanel.BackColor = System.Drawing.Color.White;
+            this.tighteningDataPanel.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(217)))), ((int)(((byte)(217)))), ((int)(((byte)(217)))));
+            this.tighteningDataPanel.BorderWidth = 1F;
+            this.tighteningDataPanel.Controls.Add(this.lblLastProduct);
+            this.tighteningDataPanel.Controls.Add(this.lblRunningStatus);
+            this.tighteningDataPanel.Controls.Add(this.torqueDivider);
+            this.tighteningDataPanel.Controls.Add(this.lblTorqueRange);
+            this.tighteningDataPanel.Controls.Add(this.lblCompletedTorque);
+            this.tighteningDataPanel.Controls.Add(this.lblRealtimeTorque);
+            this.tighteningDataPanel.Controls.Add(this.lblTargetTorque);
+            this.tighteningDataPanel.Controls.Add(this.tighteningDataTitle);
+            this.tighteningDataPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.tighteningDataPanel.Location = new System.Drawing.Point(0, 115);
+            this.tighteningDataPanel.Name = "tighteningDataPanel";
+            this.tighteningDataPanel.Padding = new System.Windows.Forms.Padding(15, 8, 15, 15);
+            this.tighteningDataPanel.Radius = 8;
+            this.tighteningDataPanel.Shadow = 2;
+            this.tighteningDataPanel.Size = new System.Drawing.Size(480, 364);
+            this.tighteningDataPanel.TabIndex = 1;
+            // 
+            // lblLastProduct
+            // 
+            this.lblLastProduct.Dock = System.Windows.Forms.DockStyle.Top;
+            this.lblLastProduct.Font = new System.Drawing.Font("微软雅黑", 9.5F);
+            this.lblLastProduct.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(64)))), ((int)(((byte)(64)))));
+            this.lblLastProduct.Location = new System.Drawing.Point(19, 166);
+            this.lblLastProduct.Name = "lblLastProduct";
+            this.lblLastProduct.Padding = new System.Windows.Forms.Padding(12, 2, 0, 2);
+            this.lblLastProduct.Size = new System.Drawing.Size(442, 24);
+            this.lblLastProduct.TabIndex = 7;
+            this.lblLastProduct.Text = "最近拧紧：--";
+            // 
+            // lblRunningStatus
+            // 
+            this.lblRunningStatus.Dock = System.Windows.Forms.DockStyle.Top;
+            this.lblRunningStatus.Font = new System.Drawing.Font("微软雅黑", 9.5F);
+            this.lblRunningStatus.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(140)))), ((int)(((byte)(140)))), ((int)(((byte)(140)))));
+            this.lblRunningStatus.Location = new System.Drawing.Point(19, 141);
+            this.lblRunningStatus.Name = "lblRunningStatus";
+            this.lblRunningStatus.Padding = new System.Windows.Forms.Padding(12, 3, 0, 2);
+            this.lblRunningStatus.Size = new System.Drawing.Size(442, 25);
+            this.lblRunningStatus.TabIndex = 6;
+            this.lblRunningStatus.Text = "运行状态：未连接";
+            // 
+            // torqueDivider
+            // 
+            this.torqueDivider.Dock = System.Windows.Forms.DockStyle.Top;
+            this.torqueDivider.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.torqueDivider.Location = new System.Drawing.Point(19, 140);
+            this.torqueDivider.Margin = new System.Windows.Forms.Padding(12, 3, 12, 3);
+            this.torqueDivider.Name = "torqueDivider";
+            this.torqueDivider.Size = new System.Drawing.Size(442, 1);
+            this.torqueDivider.TabIndex = 5;
+            // 
+            // lblTorqueRange
+            // 
+            this.lblTorqueRange.Dock = System.Windows.Forms.DockStyle.Top;
+            this.lblTorqueRange.Font = new System.Drawing.Font("微软雅黑", 9.5F);
+            this.lblTorqueRange.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(140)))), ((int)(((byte)(140)))), ((int)(((byte)(140)))));
+            this.lblTorqueRange.Location = new System.Drawing.Point(19, 116);
+            this.lblTorqueRange.Name = "lblTorqueRange";
+            this.lblTorqueRange.Padding = new System.Windows.Forms.Padding(12, 2, 0, 2);
+            this.lblTorqueRange.Size = new System.Drawing.Size(442, 24);
+            this.lblTorqueRange.TabIndex = 4;
+            this.lblTorqueRange.Text = "扭矩范围：-- ~ -- Nm";
+            // 
+            // lblCompletedTorque
+            // 
+            this.lblCompletedTorque.Dock = System.Windows.Forms.DockStyle.Top;
+            this.lblCompletedTorque.Font = new System.Drawing.Font("微软雅黑", 9.5F, System.Drawing.FontStyle.Bold);
+            this.lblCompletedTorque.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(64)))), ((int)(((byte)(64)))));
+            this.lblCompletedTorque.Location = new System.Drawing.Point(19, 92);
+            this.lblCompletedTorque.Name = "lblCompletedTorque";
+            this.lblCompletedTorque.Padding = new System.Windows.Forms.Padding(12, 2, 0, 2);
+            this.lblCompletedTorque.Size = new System.Drawing.Size(442, 24);
+            this.lblCompletedTorque.TabIndex = 3;
+            this.lblCompletedTorque.Text = "完成扭矩：-- Nm";
+            // 
+            // lblRealtimeTorque
+            // 
+            this.lblRealtimeTorque.Dock = System.Windows.Forms.DockStyle.Top;
+            this.lblRealtimeTorque.Font = new System.Drawing.Font("微软雅黑", 9.5F);
+            this.lblRealtimeTorque.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(140)))), ((int)(((byte)(140)))), ((int)(((byte)(140)))));
+            this.lblRealtimeTorque.Location = new System.Drawing.Point(19, 68);
+            this.lblRealtimeTorque.Name = "lblRealtimeTorque";
+            this.lblRealtimeTorque.Padding = new System.Windows.Forms.Padding(12, 2, 0, 2);
+            this.lblRealtimeTorque.Size = new System.Drawing.Size(442, 24);
+            this.lblRealtimeTorque.TabIndex = 2;
+            this.lblRealtimeTorque.Text = "实时扭矩：0.0 Nm";
+            // 
+            // lblTargetTorque
+            // 
+            this.lblTargetTorque.Dock = System.Windows.Forms.DockStyle.Top;
+            this.lblTargetTorque.Font = new System.Drawing.Font("微软雅黑", 9.5F);
+            this.lblTargetTorque.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(64)))), ((int)(((byte)(64)))));
+            this.lblTargetTorque.Location = new System.Drawing.Point(19, 44);
+            this.lblTargetTorque.Name = "lblTargetTorque";
+            this.lblTargetTorque.Padding = new System.Windows.Forms.Padding(12, 2, 0, 2);
+            this.lblTargetTorque.Size = new System.Drawing.Size(442, 24);
+            this.lblTargetTorque.TabIndex = 1;
+            this.lblTargetTorque.Text = "目标扭矩：-- Nm";
+            // 
+            // tighteningDataTitle
+            // 
+            this.tighteningDataTitle.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(250)))), ((int)(((byte)(252)))));
+            this.tighteningDataTitle.Dock = System.Windows.Forms.DockStyle.Top;
+            this.tighteningDataTitle.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
+            this.tighteningDataTitle.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(24)))), ((int)(((byte)(144)))), ((int)(((byte)(255)))));
+            this.tighteningDataTitle.Location = new System.Drawing.Point(19, 12);
+            this.tighteningDataTitle.Name = "tighteningDataTitle";
+            this.tighteningDataTitle.Padding = new System.Windows.Forms.Padding(12, 7, 0, 7);
+            this.tighteningDataTitle.Size = new System.Drawing.Size(442, 32);
+            this.tighteningDataTitle.TabIndex = 0;
+            this.tighteningDataTitle.Text = "拧紧轴配置";
+            // 
             // currentProductPanel
             // 
+            this.currentProductPanel.BackColor = System.Drawing.Color.White;
+            this.currentProductPanel.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(217)))), ((int)(((byte)(217)))), ((int)(((byte)(217)))));
+            this.currentProductPanel.BorderWidth = 1F;
             this.currentProductPanel.Controls.Add(this.progressBar);
             this.currentProductPanel.Controls.Add(this.currentStatusLabel);
             this.currentProductPanel.Controls.Add(this.currentBarcodeLabel);
             this.currentProductPanel.Dock = System.Windows.Forms.DockStyle.Top;
             this.currentProductPanel.Location = new System.Drawing.Point(0, 0);
             this.currentProductPanel.Name = "currentProductPanel";
-            this.currentProductPanel.Padding = new System.Windows.Forms.Padding(20);
-            this.currentProductPanel.Size = new System.Drawing.Size(480, 150);
+            this.currentProductPanel.Padding = new System.Windows.Forms.Padding(20, 15, 20, 15);
+            this.currentProductPanel.Radius = 8;
+            this.currentProductPanel.Shadow = 2;
+            this.currentProductPanel.Size = new System.Drawing.Size(480, 115);
             this.currentProductPanel.TabIndex = 0;
             // 
             // progressBar
             // 
             this.progressBar.Dock = System.Windows.Forms.DockStyle.Top;
-            this.progressBar.Location = new System.Drawing.Point(20, 75);
+            this.progressBar.Location = new System.Drawing.Point(24, 79);
             this.progressBar.Name = "progressBar";
-            this.progressBar.Size = new System.Drawing.Size(440, 25);
+            this.progressBar.Size = new System.Drawing.Size(432, 25);
             this.progressBar.TabIndex = 2;
             // 
             // currentStatusLabel
             // 
             this.currentStatusLabel.Dock = System.Windows.Forms.DockStyle.Top;
-            this.currentStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10F);
+            this.currentStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10.5F);
             this.currentStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(64)))), ((int)(((byte)(64)))));
-            this.currentStatusLabel.Location = new System.Drawing.Point(20, 50);
+            this.currentStatusLabel.Location = new System.Drawing.Point(24, 54);
             this.currentStatusLabel.Name = "currentStatusLabel";
-            this.currentStatusLabel.Size = new System.Drawing.Size(440, 25);
+            this.currentStatusLabel.Padding = new System.Windows.Forms.Padding(0, 3, 0, 3);
+            this.currentStatusLabel.Size = new System.Drawing.Size(432, 25);
             this.currentStatusLabel.TabIndex = 1;
             this.currentStatusLabel.Text = "状态: 待机中";
             // 
             // currentBarcodeLabel
             // 
+            this.currentBarcodeLabel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(250)))), ((int)(((byte)(252)))));
             this.currentBarcodeLabel.Dock = System.Windows.Forms.DockStyle.Top;
             this.currentBarcodeLabel.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
-            this.currentBarcodeLabel.Location = new System.Drawing.Point(20, 20);
+            this.currentBarcodeLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(24)))), ((int)(((byte)(144)))), ((int)(((byte)(255)))));
+            this.currentBarcodeLabel.Location = new System.Drawing.Point(24, 19);
             this.currentBarcodeLabel.Name = "currentBarcodeLabel";
-            this.currentBarcodeLabel.Size = new System.Drawing.Size(440, 30);
+            this.currentBarcodeLabel.Padding = new System.Windows.Forms.Padding(8, 5, 8, 5);
+            this.currentBarcodeLabel.Size = new System.Drawing.Size(432, 35);
             this.currentBarcodeLabel.TabIndex = 0;
             this.currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
             // 
@@ -193,9 +328,6 @@
             this.controlPanel.Controls.Add(this.btnSettings);
             this.controlPanel.Controls.Add(this.btnStop);
             this.controlPanel.Controls.Add(this.btnStart);
-            this.controlPanel.Controls.Add(this.workModeDivider);
-            this.controlPanel.Controls.Add(this.workModeLabel);
-            this.controlPanel.Controls.Add(this.workModeSwitch);
             this.controlPanel.Dock = System.Windows.Forms.DockStyle.Top;
             this.controlPanel.Location = new System.Drawing.Point(20, 140);
             this.controlPanel.Name = "controlPanel";
@@ -205,12 +337,13 @@
             // btnEmergencyStop
             // 
             this.btnEmergencyStop.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
-            this.btnEmergencyStop.Location = new System.Drawing.Point(800, 20);
+            this.btnEmergencyStop.Location = new System.Drawing.Point(420, 20);
             this.btnEmergencyStop.Name = "btnEmergencyStop";
             this.btnEmergencyStop.Size = new System.Drawing.Size(120, 45);
             this.btnEmergencyStop.TabIndex = 3;
             this.btnEmergencyStop.Text = "紧急停止";
             this.btnEmergencyStop.Type = AntdUI.TTypeMini.Error;
+            this.btnEmergencyStop.Visible = false;
             // 
             // btnSettings
             // 
@@ -249,201 +382,162 @@
             this.btnStart.Text = "启动系统";
             this.btnStart.Type = AntdUI.TTypeMini.Success;
             // 
-            // workModeDivider
-            // 
-            this.workModeDivider.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-            this.workModeDivider.Location = new System.Drawing.Point(440, 20);
-            this.workModeDivider.Name = "workModeDivider";
-            this.workModeDivider.Vertical = true;
-            this.workModeDivider.Size = new System.Drawing.Size(2, 45);
-            this.workModeDivider.TabIndex = 20;
-            // 
-            // workModeLabel
-            // 
-            this.workModeLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Bold);
-            this.workModeLabel.ForeColor = System.Drawing.Color.FromArgb(64, 64, 64);
-            this.workModeLabel.Location = new System.Drawing.Point(460, 23);
-            this.workModeLabel.Name = "workModeLabel";
-            this.workModeLabel.Size = new System.Drawing.Size(180, 30);
-            this.workModeLabel.TabIndex = 21;
-            this.workModeLabel.Text = "工作模式：完整流程";
-            this.workModeLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            // 
-            // workModeSwitch
-            // 
-            this.workModeSwitch.AutoCheck = true;
-            this.workModeSwitch.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-            this.workModeSwitch.Location = new System.Drawing.Point(650, 25);
-            this.workModeSwitch.Name = "workModeSwitch";
-            this.workModeSwitch.Size = new System.Drawing.Size(60, 24);
-            this.workModeSwitch.TabIndex = 22;
-            this.workModeSwitch.Text = "";
-            this.workModeSwitch.CheckedChanged += new AntdUI.BoolEventHandler(this.workModeSwitch_CheckedChanged);
-
-            // 
             // statusCards
             // 
-            this.statusCards.Controls.Add(this.pcStatusCard);
-            this.statusCards.Controls.Add(this.screwStatusCard);
-            this.statusCards.Controls.Add(this.scannerStatusCard);
-            this.statusCards.Controls.Add(this.plcStatusCard);
+            this.statusCards.BackColor = System.Drawing.Color.White;
+            this.statusCards.ColumnCount = 3;
+            this.statusCards.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33F));
+            this.statusCards.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33F));
+            this.statusCards.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.34F));
+            this.statusCards.Controls.Add(this.plcStatusCard, 0, 0);
+            this.statusCards.Controls.Add(this.scannerStatusCard, 1, 0);
+            this.statusCards.Controls.Add(this.screwStatusCard, 2, 0);
             this.statusCards.Dock = System.Windows.Forms.DockStyle.Top;
             this.statusCards.Location = new System.Drawing.Point(20, 20);
             this.statusCards.Name = "statusCards";
+            this.statusCards.Padding = new System.Windows.Forms.Padding(0, 10, 0, 10);
+            this.statusCards.RowCount = 1;
+            this.statusCards.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.statusCards.Size = new System.Drawing.Size(1031, 120);
             this.statusCards.TabIndex = 0;
-            // 
-            // pcStatusCard
-            // 
-            this.pcStatusCard.BackColor = System.Drawing.Color.White;
-            this.pcStatusCard.Controls.Add(this.pcIndicator);
-            this.pcStatusCard.Controls.Add(this.pcStatusLabel);
-            this.pcStatusCard.Controls.Add(this.pcTitleLabel);
-            this.pcStatusCard.Location = new System.Drawing.Point(720, 10);
-            this.pcStatusCard.Name = "pcStatusCard";
-            this.pcStatusCard.Size = new System.Drawing.Size(230, 100);
-            this.pcStatusCard.TabIndex = 3;
-            // 
-            // pcIndicator
-            // 
-            this.pcIndicator.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(173)))), ((int)(((byte)(20)))));
-            this.pcIndicator.Location = new System.Drawing.Point(195, 20);
-            this.pcIndicator.Name = "pcIndicator";
-            this.pcIndicator.Size = new System.Drawing.Size(12, 12);
-            this.pcIndicator.TabIndex = 2;
-            // 
-            // pcStatusLabel
-            // 
-            this.pcStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10F);
-            this.pcStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(250)))), ((int)(((byte)(173)))), ((int)(((byte)(20)))));
-            this.pcStatusLabel.Location = new System.Drawing.Point(15, 45);
-            this.pcStatusLabel.Name = "pcStatusLabel";
-            this.pcStatusLabel.Size = new System.Drawing.Size(150, 23);
-            this.pcStatusLabel.TabIndex = 1;
-            this.pcStatusLabel.Text = "等待数据";
-            // 
-            // pcTitleLabel
-            // 
-            this.pcTitleLabel.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
-            this.pcTitleLabel.Location = new System.Drawing.Point(15, 15);
-            this.pcTitleLabel.Name = "pcTitleLabel";
-            this.pcTitleLabel.Size = new System.Drawing.Size(150, 23);
-            this.pcTitleLabel.TabIndex = 0;
-            this.pcTitleLabel.Text = "PC通讯";
-            // 
-            // screwStatusCard
-            // 
-            this.screwStatusCard.BackColor = System.Drawing.Color.White;
-            this.screwStatusCard.Controls.Add(this.tighteningAxisIndicator);
-            this.screwStatusCard.Controls.Add(this.tighteningAxisStatusLabel);
-            this.screwStatusCard.Controls.Add(this.screwTitleLabel);
-            this.screwStatusCard.Location = new System.Drawing.Point(480, 10);
-            this.screwStatusCard.Name = "screwStatusCard";
-            this.screwStatusCard.Size = new System.Drawing.Size(230, 100);
-            this.screwStatusCard.TabIndex = 2;
-            // 
-            // tighteningAxisIndicator
-            // 
-            this.tighteningAxisIndicator.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
-            this.tighteningAxisIndicator.Location = new System.Drawing.Point(195, 20);
-            this.tighteningAxisIndicator.Name = "tighteningAxisIndicator";
-            this.tighteningAxisIndicator.Size = new System.Drawing.Size(12, 12);
-            this.tighteningAxisIndicator.TabIndex = 2;
-            // 
-            // tighteningAxisStatusLabel
-            // 
-            this.tighteningAxisStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10F);
-            this.tighteningAxisStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
-            this.tighteningAxisStatusLabel.Location = new System.Drawing.Point(15, 45);
-            this.tighteningAxisStatusLabel.Name = "tighteningAxisStatusLabel";
-            this.tighteningAxisStatusLabel.Size = new System.Drawing.Size(150, 23);
-            this.tighteningAxisStatusLabel.TabIndex = 1;
-            this.tighteningAxisStatusLabel.Text = "已连接";
-            // 
-            // screwTitleLabel
-            // 
-            this.screwTitleLabel.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
-            this.screwTitleLabel.Location = new System.Drawing.Point(15, 15);
-            this.screwTitleLabel.Name = "screwTitleLabel";
-            this.screwTitleLabel.Size = new System.Drawing.Size(150, 23);
-            this.screwTitleLabel.TabIndex = 0;
-            this.screwTitleLabel.Text = "拧紧轴";
-            // 
-            // scannerStatusCard
-            // 
-            this.scannerStatusCard.BackColor = System.Drawing.Color.White;
-            this.scannerStatusCard.Controls.Add(this.scannerIndicator);
-            this.scannerStatusCard.Controls.Add(this.scannerStatusLabel);
-            this.scannerStatusCard.Controls.Add(this.scannerTitleLabel);
-            this.scannerStatusCard.Location = new System.Drawing.Point(240, 10);
-            this.scannerStatusCard.Name = "scannerStatusCard";
-            this.scannerStatusCard.Size = new System.Drawing.Size(230, 100);
-            this.scannerStatusCard.TabIndex = 1;
-            // 
-            // scannerIndicator
-            // 
-            this.scannerIndicator.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
-            this.scannerIndicator.Location = new System.Drawing.Point(195, 20);
-            this.scannerIndicator.Name = "scannerIndicator";
-            this.scannerIndicator.Size = new System.Drawing.Size(12, 12);
-            this.scannerIndicator.TabIndex = 2;
-            // 
-            // scannerStatusLabel
-            // 
-            this.scannerStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10F);
-            this.scannerStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
-            this.scannerStatusLabel.Location = new System.Drawing.Point(15, 45);
-            this.scannerStatusLabel.Name = "scannerStatusLabel";
-            this.scannerStatusLabel.Size = new System.Drawing.Size(150, 23);
-            this.scannerStatusLabel.TabIndex = 1;
-            this.scannerStatusLabel.Text = "已连接";
-            // 
-            // scannerTitleLabel
-            // 
-            this.scannerTitleLabel.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
-            this.scannerTitleLabel.Location = new System.Drawing.Point(15, 15);
-            this.scannerTitleLabel.Name = "scannerTitleLabel";
-            this.scannerTitleLabel.Size = new System.Drawing.Size(150, 23);
-            this.scannerTitleLabel.TabIndex = 0;
-            this.scannerTitleLabel.Text = "扫码枪";
             // 
             // plcStatusCard
             // 
             this.plcStatusCard.BackColor = System.Drawing.Color.White;
+            this.plcStatusCard.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(230)))), ((int)(((byte)(230)))), ((int)(((byte)(230)))));
+            this.plcStatusCard.BorderWidth = 1F;
             this.plcStatusCard.Controls.Add(this.plcIndicator);
             this.plcStatusCard.Controls.Add(this.plcStatusLabel);
             this.plcStatusCard.Controls.Add(this.plcTitleLabel);
+            this.plcStatusCard.Dock = System.Windows.Forms.DockStyle.Fill;
             this.plcStatusCard.Location = new System.Drawing.Point(0, 10);
+            this.plcStatusCard.Margin = new System.Windows.Forms.Padding(0, 0, 10, 0);
             this.plcStatusCard.Name = "plcStatusCard";
-            this.plcStatusCard.Size = new System.Drawing.Size(230, 100);
+            this.plcStatusCard.Radius = 8;
+            this.plcStatusCard.Shadow = 2;
+            this.plcStatusCard.Size = new System.Drawing.Size(333, 100);
             this.plcStatusCard.TabIndex = 0;
             // 
             // plcIndicator
             // 
-            this.plcIndicator.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
-            this.plcIndicator.Location = new System.Drawing.Point(195, 20);
+            this.plcIndicator.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(77)))), ((int)(((byte)(79)))));
+            this.plcIndicator.Location = new System.Drawing.Point(285, 18);
             this.plcIndicator.Name = "plcIndicator";
-            this.plcIndicator.Size = new System.Drawing.Size(12, 12);
+            this.plcIndicator.Radius = 7;
+            this.plcIndicator.Size = new System.Drawing.Size(14, 14);
             this.plcIndicator.TabIndex = 2;
             // 
             // plcStatusLabel
             // 
-            this.plcStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10F);
-            this.plcStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(196)))), ((int)(((byte)(26)))));
-            this.plcStatusLabel.Location = new System.Drawing.Point(15, 45);
+            this.plcStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10.5F);
+            this.plcStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(77)))), ((int)(((byte)(79)))));
+            this.plcStatusLabel.Location = new System.Drawing.Point(18, 50);
             this.plcStatusLabel.Name = "plcStatusLabel";
-            this.plcStatusLabel.Size = new System.Drawing.Size(150, 23);
+            this.plcStatusLabel.Size = new System.Drawing.Size(280, 25);
             this.plcStatusLabel.TabIndex = 1;
-            this.plcStatusLabel.Text = "已连接";
+            this.plcStatusLabel.Text = "未连接";
             // 
             // plcTitleLabel
             // 
             this.plcTitleLabel.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
-            this.plcTitleLabel.Location = new System.Drawing.Point(15, 15);
+            this.plcTitleLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(45)))), ((int)(((byte)(45)))), ((int)(((byte)(45)))));
+            this.plcTitleLabel.Location = new System.Drawing.Point(18, 18);
             this.plcTitleLabel.Name = "plcTitleLabel";
-            this.plcTitleLabel.Size = new System.Drawing.Size(150, 23);
+            this.plcTitleLabel.Size = new System.Drawing.Size(250, 25);
             this.plcTitleLabel.TabIndex = 0;
             this.plcTitleLabel.Text = "PLC连接";
+            // 
+            // scannerStatusCard
+            // 
+            this.scannerStatusCard.BackColor = System.Drawing.Color.White;
+            this.scannerStatusCard.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(230)))), ((int)(((byte)(230)))), ((int)(((byte)(230)))));
+            this.scannerStatusCard.BorderWidth = 1F;
+            this.scannerStatusCard.Controls.Add(this.scannerIndicator);
+            this.scannerStatusCard.Controls.Add(this.scannerStatusLabel);
+            this.scannerStatusCard.Controls.Add(this.scannerTitleLabel);
+            this.scannerStatusCard.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.scannerStatusCard.Location = new System.Drawing.Point(348, 10);
+            this.scannerStatusCard.Margin = new System.Windows.Forms.Padding(5, 0, 5, 0);
+            this.scannerStatusCard.Name = "scannerStatusCard";
+            this.scannerStatusCard.Radius = 8;
+            this.scannerStatusCard.Shadow = 2;
+            this.scannerStatusCard.Size = new System.Drawing.Size(333, 100);
+            this.scannerStatusCard.TabIndex = 1;
+            // 
+            // scannerIndicator
+            // 
+            this.scannerIndicator.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(77)))), ((int)(((byte)(79)))));
+            this.scannerIndicator.Location = new System.Drawing.Point(285, 18);
+            this.scannerIndicator.Name = "scannerIndicator";
+            this.scannerIndicator.Radius = 7;
+            this.scannerIndicator.Size = new System.Drawing.Size(14, 14);
+            this.scannerIndicator.TabIndex = 2;
+            // 
+            // scannerStatusLabel
+            // 
+            this.scannerStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10.5F);
+            this.scannerStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(77)))), ((int)(((byte)(79)))));
+            this.scannerStatusLabel.Location = new System.Drawing.Point(18, 50);
+            this.scannerStatusLabel.Name = "scannerStatusLabel";
+            this.scannerStatusLabel.Size = new System.Drawing.Size(280, 25);
+            this.scannerStatusLabel.TabIndex = 1;
+            this.scannerStatusLabel.Text = "未连接";
+            // 
+            // scannerTitleLabel
+            // 
+            this.scannerTitleLabel.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
+            this.scannerTitleLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(45)))), ((int)(((byte)(45)))), ((int)(((byte)(45)))));
+            this.scannerTitleLabel.Location = new System.Drawing.Point(18, 18);
+            this.scannerTitleLabel.Name = "scannerTitleLabel";
+            this.scannerTitleLabel.Size = new System.Drawing.Size(250, 25);
+            this.scannerTitleLabel.TabIndex = 0;
+            this.scannerTitleLabel.Text = "扫码枪";
+            // 
+            // screwStatusCard
+            // 
+            this.screwStatusCard.BackColor = System.Drawing.Color.White;
+            this.screwStatusCard.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(230)))), ((int)(((byte)(230)))), ((int)(((byte)(230)))));
+            this.screwStatusCard.BorderWidth = 1F;
+            this.screwStatusCard.Controls.Add(this.tighteningAxisIndicator);
+            this.screwStatusCard.Controls.Add(this.tighteningAxisStatusLabel);
+            this.screwStatusCard.Controls.Add(this.screwTitleLabel);
+            this.screwStatusCard.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.screwStatusCard.Location = new System.Drawing.Point(696, 10);
+            this.screwStatusCard.Margin = new System.Windows.Forms.Padding(10, 0, 0, 0);
+            this.screwStatusCard.Name = "screwStatusCard";
+            this.screwStatusCard.Radius = 8;
+            this.screwStatusCard.Shadow = 2;
+            this.screwStatusCard.Size = new System.Drawing.Size(335, 100);
+            this.screwStatusCard.TabIndex = 2;
+            // 
+            // tighteningAxisIndicator
+            // 
+            this.tighteningAxisIndicator.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(77)))), ((int)(((byte)(79)))));
+            this.tighteningAxisIndicator.Location = new System.Drawing.Point(285, 18);
+            this.tighteningAxisIndicator.Name = "tighteningAxisIndicator";
+            this.tighteningAxisIndicator.Radius = 7;
+            this.tighteningAxisIndicator.Size = new System.Drawing.Size(14, 14);
+            this.tighteningAxisIndicator.TabIndex = 2;
+            // 
+            // tighteningAxisStatusLabel
+            // 
+            this.tighteningAxisStatusLabel.Font = new System.Drawing.Font("微软雅黑", 10.5F);
+            this.tighteningAxisStatusLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(77)))), ((int)(((byte)(79)))));
+            this.tighteningAxisStatusLabel.Location = new System.Drawing.Point(18, 50);
+            this.tighteningAxisStatusLabel.Name = "tighteningAxisStatusLabel";
+            this.tighteningAxisStatusLabel.Size = new System.Drawing.Size(280, 25);
+            this.tighteningAxisStatusLabel.TabIndex = 1;
+            this.tighteningAxisStatusLabel.Text = "未连接";
+            // 
+            // screwTitleLabel
+            // 
+            this.screwTitleLabel.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
+            this.screwTitleLabel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(45)))), ((int)(((byte)(45)))), ((int)(((byte)(45)))));
+            this.screwTitleLabel.Location = new System.Drawing.Point(18, 18);
+            this.screwTitleLabel.Name = "screwTitleLabel";
+            this.screwTitleLabel.Size = new System.Drawing.Size(250, 25);
+            this.screwTitleLabel.TabIndex = 0;
+            this.screwTitleLabel.Text = "拧紧轴";
             // 
             // SystemMonitorControl
             // 
@@ -456,13 +550,13 @@
             this.logPanel.ResumeLayout(false);
             this.logPanel.PerformLayout();
             this.dataPanel.ResumeLayout(false);
+            this.tighteningDataPanel.ResumeLayout(false);
             this.currentProductPanel.ResumeLayout(false);
             this.controlPanel.ResumeLayout(false);
             this.statusCards.ResumeLayout(false);
-            this.pcStatusCard.ResumeLayout(false);
-            this.screwStatusCard.ResumeLayout(false);
-            this.scannerStatusCard.ResumeLayout(false);
             this.plcStatusCard.ResumeLayout(false);
+            this.scannerStatusCard.ResumeLayout(false);
+            this.screwStatusCard.ResumeLayout(false);
             this.ResumeLayout(false);
 
         }
@@ -483,11 +577,7 @@
         private AntdUI.Button btnSettings;
         private AntdUI.Button btnStop;
         private AntdUI.Button btnStart;
-        private AntdUI.Panel statusCards;
-        private AntdUI.Panel pcStatusCard;
-        private AntdUI.Panel pcIndicator;
-        private AntdUI.Label pcStatusLabel;
-        private AntdUI.Label pcTitleLabel;
+        private System.Windows.Forms.TableLayoutPanel statusCards;
         private AntdUI.Panel screwStatusCard;
         private AntdUI.Panel tighteningAxisIndicator;
         private AntdUI.Label tighteningAxisStatusLabel;
@@ -501,9 +591,14 @@
         private AntdUI.Label plcStatusLabel;
         private AntdUI.Label plcTitleLabel;
         private System.Windows.Forms.TextBox logTextBox;
-        private AntdUI.Switch workModeSwitch;
-        private AntdUI.Label workModeLabel;
-        private AntdUI.Divider workModeDivider;
-
+        private AntdUI.Panel tighteningDataPanel;
+        private AntdUI.Label tighteningDataTitle;
+        private AntdUI.Label lblTargetTorque;
+        private AntdUI.Label lblRealtimeTorque;
+        private AntdUI.Label lblCompletedTorque;
+        private AntdUI.Label lblTorqueRange;
+        private AntdUI.Divider torqueDivider;
+        private AntdUI.Label lblRunningStatus;
+        private AntdUI.Label lblLastProduct;
     }
 }

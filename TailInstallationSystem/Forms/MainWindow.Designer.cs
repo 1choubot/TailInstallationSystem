@@ -33,6 +33,7 @@
             this.statusLabel = new AntdUI.Label();
             this.headerPanel = new AntdUI.Panel();
             this.titleLabel = new AntdUI.Label();
+            this.clockLabel = new AntdUI.Label();
             this.sidePanel = new AntdUI.Panel();
             this.menuPanel = new AntdUI.Panel();
             this.btnSystemLog = new AntdUI.Button();
@@ -72,6 +73,7 @@
             this.plcIndicator = new AntdUI.Panel();
             this.plcStatusLabel = new AntdUI.Label();
             this.plcTitleLabel = new AntdUI.Label();
+            this.clockTimer = new System.Windows.Forms.Timer();
             this.statusPanel.SuspendLayout();
             this.headerPanel.SuspendLayout();
             this.sidePanel.SuspendLayout();
@@ -95,6 +97,7 @@
             this.titleBar.Name = "titleBar";
             this.titleBar.ShowButton = true;
             this.titleBar.ShowIcon = true;
+            this.titleBar.Icon = System.Drawing.Image.FromFile("Resources\\sjslogo.png");
             this.titleBar.Size = new System.Drawing.Size(1200, 40);
             this.titleBar.SubText = "v1.0";
             this.titleBar.TabIndex = 0;
@@ -126,6 +129,7 @@
             // 
             this.headerPanel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(24)))), ((int)(((byte)(144)))), ((int)(((byte)(255)))));
             this.headerPanel.Controls.Add(this.titleLabel);
+            this.headerPanel.Controls.Add(this.clockLabel);
             this.headerPanel.Dock = System.Windows.Forms.DockStyle.Top;
             this.headerPanel.Location = new System.Drawing.Point(0, 40);
             this.headerPanel.Name = "headerPanel";
@@ -140,9 +144,22 @@
             this.titleLabel.Location = new System.Drawing.Point(0, 0);
             this.titleLabel.Name = "titleLabel";
             this.titleLabel.Padding = new System.Windows.Forms.Padding(20, 0, 0, 0);
-            this.titleLabel.Size = new System.Drawing.Size(1200, 60);
+            this.titleLabel.Size = new System.Drawing.Size(1000, 60);
             this.titleLabel.TabIndex = 0;
             this.titleLabel.Text = "节点仪尾椎安装系统 ";
+            // 
+            // clockLabel
+            // 
+            this.clockLabel.Dock = System.Windows.Forms.DockStyle.Right;
+            this.clockLabel.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
+            this.clockLabel.ForeColor = System.Drawing.Color.White;
+            this.clockLabel.Location = new System.Drawing.Point(1000, 0);
+            this.clockLabel.Name = "clockLabel";
+            this.clockLabel.Size = new System.Drawing.Size(200, 60);
+            this.clockLabel.TabIndex = 1;
+            this.clockLabel.Text = "2025-10-23 15:01:31";
+            this.clockLabel.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            this.clockLabel.Padding = new System.Windows.Forms.Padding(0, 0, 20, 0);
             // 
             // sidePanel
             // 
@@ -574,6 +591,11 @@
             this.plcTitleLabel.TabIndex = 0;
             this.plcTitleLabel.Text = "PLC连接";
             // 
+            // clockTimer
+            // 
+            this.clockTimer.Interval = 1000;
+            this.clockTimer.Tick += new System.EventHandler(this.clockTimer_Tick);
+            // 
             // MainWindow
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
@@ -586,6 +608,7 @@
             this.Controls.Add(this.titleBar);
             this.Controls.Add(this.statusPanel);
             this.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.Icon = new System.Drawing.Icon("Resources\\SJS 512-1.ico");
             this.MinimumSize = new System.Drawing.Size(1000, 600);
             this.Name = "MainWindow";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
@@ -615,6 +638,7 @@
         private AntdUI.Label statusLabel;
         private AntdUI.Panel headerPanel;
         private AntdUI.Label titleLabel;
+        private AntdUI.Label clockLabel;
         private AntdUI.Panel sidePanel;
         private AntdUI.Panel menuPanel;
         private AntdUI.Button btnSystemLog;
@@ -654,5 +678,6 @@
         private AntdUI.Panel plcIndicator;
         private AntdUI.Label plcStatusLabel;
         private AntdUI.Label plcTitleLabel;
+        private System.Windows.Forms.Timer clockTimer;
     }
 }

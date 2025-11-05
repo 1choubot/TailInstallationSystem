@@ -348,7 +348,7 @@ namespace TailInstallationSystem.View
                 }
                 finally
                 {
-                    SetButtonState(exportButton, true, "📤 导出");
+                    SetButtonState(exportButton, true, "导出");
                 }
             }
         }

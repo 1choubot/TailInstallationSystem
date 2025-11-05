@@ -1,8 +1,6 @@
-﻿using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+﻿using AntdUI;
+using Newtonsoft.Json;
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -14,56 +12,13 @@ using TailInstallationSystem.Utils;
 namespace TailInstallationSystem
 {
     /// <summary>
-    /// 产品数据缓存类
+    /// 尾椎安装控制器 
     /// </summary>
-    public class ProductDataBuffer
-    {
-        public string ProductCode { get; set; }          // 产品码（A壳码）
-        public string Process11Data { get; set; }        // 工序11完整JSON
-        public string Process12Data { get; set; }        // 工序12完整JSON
-        public string Process13Data { get; set; }        // 工序13完整JSON
-        public DateTime CreatedTime { get; set; }        // 创建时间
-        public DateTime LastUpdateTime { get; set; }     // 最后更新时间
-        public bool IsNG { get; set; }                   // 是否NG产品
-        public string NGProcessId { get; set; }          // NG发生在哪道工序
-
-        /// <summary>
-        /// 数据是否完整（3道工序都收到）
-        /// </summary>
-        public bool IsComplete =>
-            !string.IsNullOrEmpty(Process11Data) &&
-            !string.IsNullOrEmpty(Process12Data) &&
-            !string.IsNullOrEmpty(Process13Data);
-
-        /// <summary>
-        /// 已接收的工序数量
-        /// </summary>
-        public int ReceivedCount =>
-            (string.IsNullOrEmpty(Process11Data) ? 0 : 1) +
-            (string.IsNullOrEmpty(Process12Data) ? 0 : 1) +
-            (string.IsNullOrEmpty(Process13Data) ? 0 : 1);
-
-        /// <summary>
-        /// 获取已收到的工序数据数组
-        /// </summary>
-        public string[] GetReceivedProcessData()
-        {
-            var dataList = new List<string>();
-            if (!string.IsNullOrEmpty(Process11Data)) dataList.Add(Process11Data);
-            if (!string.IsNullOrEmpty(Process12Data)) dataList.Add(Process12Data);
-            if (!string.IsNullOrEmpty(Process13Data)) dataList.Add(Process13Data);
-            return dataList.ToArray();
-        }
-    }
-
     public class TailInstallationController
     {
         private CommunicationManager commManager;
         private DataManager dataManager;
         private CommunicationConfig _config;
-        private readonly ConcurrentDictionary<string, ProductDataBuffer> productDataBuffers;
-        private const int MAX_PRODUCT_BUFFER_COUNT = 10;
-        private const int BUFFER_TIMEOUT_MINUTES = 30;
 
         // 扫码等待配置
         private const int SCAN_WAIT_TIMEOUT_SECONDS = 3;
@@ -75,10 +30,6 @@ namespace TailInstallationSystem
         private bool isRunning = false;
         private readonly object runningStateLock = new object();
 
-        // 工作模式
-        private WorkMode _currentWorkMode = WorkMode.FullProcess;
-        private readonly object _workModeLock = new object();
-
         // 条码等待任务管理
         private volatile TaskCompletionSource<string> barcodeWaitTask;
         private readonly object barcodeTaskLock = new object();
@@ -87,6 +38,8 @@ namespace TailInstallationSystem
         private string cachedBarcode = null;
         private readonly object barcodeLock = new object();
         private CancellationTokenSource cancellationTokenSource;
+        private CancellationTokenSource _currentMonitoringCts = null; 
+        private readonly object _monitoringCtsLock = new object();
 
         // 拧紧轴数据缓存
         private TighteningAxisData latestTighteningData = null;
@@ -104,51 +57,15 @@ namespace TailInstallationSystem
             dataManager = new DataManager(_config);
             cancellationTokenSource = new CancellationTokenSource();
 
-            // 初始化产品缓存字典
-            productDataBuffers = new ConcurrentDictionary<string, ProductDataBuffer>();
-
-            // 绑定事件
-            commManager.OnDataReceived += ProcessReceivedData;
-            commManager.OnBarcodeScanned += ProcessBarcodeData;
-            commManager.OnTighteningDataReceived += ProcessTighteningData; 
-        }
-        /// <summary>
-        /// 更新工作模式
-        /// </summary>
-        public void UpdateWorkMode(WorkMode newMode)
-        {
-            lock (_workModeLock)
+            if (commManager != null)
             {
-                if (_currentWorkMode != newMode)
-                {
-                    _currentWorkMode = newMode;
-                    LogManager.LogInfo($"工作模式已切换为: {GetWorkModeDisplayName(newMode)}");
-                }
+                commManager.OnBarcodeScanned += ProcessBarcodeData;
+                commManager.OnTighteningDataReceived += ProcessTighteningData;
+                LogManager.LogInfo("控制器已订阅通讯事件");
             }
-        }
-        /// <summary>
-        /// 获取当前工作模式
-        /// </summary>
-        public WorkMode GetCurrentWorkMode()
-        {
-            lock (_workModeLock)
+            else
             {
-                return _currentWorkMode;
-            }
-        }
-        /// <summary>
-        /// 获取工作模式显示名称
-        /// </summary>
-        private string GetWorkModeDisplayName(WorkMode mode)
-        {
-            switch (mode)
-            {
-                case WorkMode.FullProcess:
-                    return "完整流程模式";
-                case WorkMode.Independent:
-                    return "独立模式（仅工序4）";
-                default:
-                    return "未知模式";
+                LogManager.LogError("通讯管理器为null，无法订阅事件");
             }
         }
 
@@ -173,7 +90,6 @@ namespace TailInstallationSystem
 
             try
             {
-                // 启动前延迟，确保旧资源完全释放
                 await Task.Delay(200);
                 LogManager.LogInfo("系统启动前等待资源就绪（200ms）");
 
@@ -184,19 +100,18 @@ namespace TailInstallationSystem
                     LogManager.LogInfo("系统启动，已清空条码缓存");
                 }
 
-                // 清空扫码缓存
                 lock (barcodeLock)
                 {
                     cachedBarcode = null;
                 }
 
-                // 清空产品数据缓存
-                productDataBuffers.Clear();
-                LogManager.LogInfo("系统启动，已清空产品数据缓存");
-
                 // 重新创建取消令牌
                 cancellationTokenSource?.Dispose();
                 cancellationTokenSource = new CancellationTokenSource();
+
+                LogManager.LogInfo("=============");
+                LogManager.LogInfo("系统已启动");
+                LogManager.LogInfo("=============");
 
                 // 启动主工作循环
                 _ = Task.Run(MainWorkLoop, cancellationTokenSource.Token);
@@ -210,7 +125,6 @@ namespace TailInstallationSystem
                 throw;
             }
         }
-
 
         public async Task StopSystem()
         {
@@ -228,21 +142,23 @@ namespace TailInstallationSystem
             {
                 LogManager.LogInfo("开始停止系统...");
 
-                // 1. 取消所有异步操作
-                cancellationTokenSource?.Cancel();
-
-                // 2. 等待短暂时间让异步任务完成
-                await Task.Delay(500);
-
-                // 3. 先解绑事件，避免继续接收数据
-                if (commManager != null)
+                // 先取消当前监控任务（如果存在）
+                lock (_monitoringCtsLock)
                 {
-                    commManager.OnDataReceived -= ProcessReceivedData;
-                    commManager.OnBarcodeScanned -= ProcessBarcodeData;
-                    commManager.OnTighteningDataReceived -= ProcessTighteningData;
+                    if (_currentMonitoringCts != null && !_currentMonitoringCts.IsCancellationRequested)
+                    {
+                        string currentBarcode = _currentProductBarcode ?? "未知产品";
+                        LogManager.LogInfo($"停止系统：取消当前监控任务 | 条码:{currentBarcode}");
+                        _currentMonitoringCts.Cancel();
+                        _currentMonitoringCts = null; // 清空引用
+                    }
                 }
 
-                // 4. 清理等待任务
+                // 取消系统主令牌
+                cancellationTokenSource?.Cancel();
+                await Task.Delay(500);
+
+                // 清理等待任务
                 lock (barcodeTaskLock)
                 {
                     if (barcodeWaitTask != null && !barcodeWaitTask.Task.IsCompleted)
@@ -251,15 +167,11 @@ namespace TailInstallationSystem
                         {
                             barcodeWaitTask.SetCanceled();
                         }
-                        catch (InvalidOperationException)
-                        {
-                            // 任务可能已经完成，忽略异常
-                        }
+                        catch (InvalidOperationException) { }
                         barcodeWaitTask = null;
                     }
                 }
 
-                // 5. 清空缓存
                 lock (barcodeLock)
                 {
                     cachedBarcode = null;
@@ -270,13 +182,8 @@ namespace TailInstallationSystem
                     latestTighteningData = null;
                 }
 
-                // 6. 等待短暂时间让事件处理完成
                 await Task.Delay(200);
-
-                // 7. 释放通讯管理器（会触发资源释放和延迟）
-                commManager?.Dispose();
-
-                // 额外等待确保资源完全释放
+                //commManager?.Dispose();
                 await Task.Delay(300);
 
                 LogManager.LogInfo("系统已完全停止");
@@ -294,7 +201,6 @@ namespace TailInstallationSystem
 
             DateTime lastDebugOutput = DateTime.MinValue;
             bool isScanProcessing = false;
-            bool isTighteningProcessing = false;
 
             while (GetRunningState() && !cancellationTokenSource.Token.IsCancellationRequested)
             {
@@ -305,11 +211,11 @@ namespace TailInstallationSystem
 
                     if (shouldOutputDebug)
                     {
-                        LogManager.LogDebug($"主循环检查 - 扫码中:{isScanProcessing}, 拧紧中:{isTighteningProcessing}");
+                        LogManager.LogDebug($"主循环检查 - 扫码中:{isScanProcessing}");
                         lastDebugOutput = now;
                     }
 
-                    // 检查扫码触发
+                    // 检查扫码触发（D500）
                     if (!isScanProcessing)
                     {
                         try
@@ -321,15 +227,7 @@ namespace TailInstallationSystem
                                 isScanProcessing = true;
                                 try
                                 {
-                                    // 根据工作模式选择不同的扫码流程
-                                    if (GetCurrentWorkMode() == WorkMode.Independent)
-                                    {
-                                        await ExecuteIndependentModeScan();
-                                    }
-                                    else
-                                    {
-                                        await ExecuteFullProcessModeScan();
-                                    }
+                                    await ExecuteScanProcess();
                                 }
                                 finally
                                 {
@@ -350,48 +248,6 @@ namespace TailInstallationSystem
                         }
                     }
 
-                    // 检查拧紧触发
-                    if (!isTighteningProcessing)
-                    {
-                        try
-                        {
-                            bool tighteningTriggered = await commManager.CheckTighteningTrigger();
-                            if (tighteningTriggered)
-                            {
-                                LogManager.LogInfo("D501触发：开始读取拧紧数据");
-                                isTighteningProcessing = true;
-
-                                try
-                                {
-                                    // 根据工作模式选择不同的拧紧流程
-                                    if (GetCurrentWorkMode() == WorkMode.Independent)
-                                    {
-                                        await ExecuteIndependentModeTightening();
-                                    }
-                                    else
-                                    {
-                                        await ExecuteFullProcessModeTightening();
-                                    }
-                                }
-                                finally
-                                {
-                                    isTighteningProcessing = false;
-                                }
-                            }
-                        }
-                        catch (Exception tightEx)
-                        {
-                            LogManager.LogError($"拧紧流程检测异常: {tightEx.Message}");
-                            isTighteningProcessing = false;
-
-                            if (tightEx.Message.Contains("远程主机强迫关闭") ||
-                                tightEx.Message.Contains("目标计算机积极拒绝"))
-                            {
-                                commManager.SafeTriggerDeviceConnectionChanged("PLC", false);
-                            }
-                        }
-                    }
-
                     await Task.Delay(50, cancellationTokenSource.Token);
                 }
                 catch (OperationCanceledException)
@@ -403,7 +259,6 @@ namespace TailInstallationSystem
                 {
                     LogManager.LogError($"主工作循环异常: {ex.Message}");
                     isScanProcessing = false;
-                    isTighteningProcessing = false;
                     await Task.Delay(1000, cancellationTokenSource.Token);
                 }
             }
@@ -412,19 +267,17 @@ namespace TailInstallationSystem
         }
 
         /// <summary>
-        /// 独立模式扫码流程 - 仅扫码和缓存条码
+        /// 扫码流程（D500触发）
         /// </summary>
-        private async Task ExecuteIndependentModeScan()
+        private async Task ExecuteScanProcess()
         {
             var startTime = DateTime.Now;
             string barcode = null;
             bool scanSuccess = false;
-
             try
             {
-                LogManager.LogInfo("========== 独立模式扫码流程开始 ==========");
-                OnProcessStatusChanged?.Invoke("", "扫码触发（独立模式）");
-
+                LogManager.LogInfo("========== 扫码流程开始 ==========");
+                OnProcessStatusChanged?.Invoke("", "扫码触发");
                 // 清空旧缓存
                 lock (barcodeLock)
                 {
@@ -434,7 +287,6 @@ namespace TailInstallationSystem
                         cachedBarcode = null;
                     }
                 }
-
                 // 清理等待任务
                 lock (barcodeTaskLock)
                 {
@@ -451,592 +303,536 @@ namespace TailInstallationSystem
                         barcodeWaitTask = null;
                     }
                 }
-
                 // 执行扫码
                 barcode = await WaitForBarcodeScanWithRetry();
-
                 if (!string.IsNullOrWhiteSpace(barcode))
                 {
                     scanSuccess = true;
-
-                    // 直接缓存条码，不检查数据完整性
-                    lock (_barcodeCacheLock)
+                    // 取消旧的监控任务 
+                    lock (_monitoringCtsLock)
                     {
-                        _currentProductBarcode = barcode;
-                        LogManager.LogInfo($"独立模式：条码已缓存: {barcode}");
-                    }
-
-                    OnCurrentProductChanged?.Invoke(barcode, "扫码成功（独立模式）");
-                    OnProcessStatusChanged?.Invoke(barcode, "扫码成功 - 等待拧紧触发");
-
-                    LogManager.LogInfo($"独立模式扫码成功 | 条码:{barcode}");
-
-                    // 反馈PLC扫码成功
-                    await commManager.WritePLCDRegister(
-                        commManager.GetCurrentConfig().PLC.ScanResultAddress, 1);
-
-                    LogManager.LogDebug("PLC反馈 | D520=1 (扫码OK)");
-                }
-                else
-                {
-                    scanSuccess = false;
-                    LogManager.LogError("独立模式扫码失败 | 原因:条码为空");
-
-                    // 反馈PLC扫码失败
-                    await commManager.WritePLCDRegister(
-                        commManager.GetCurrentConfig().PLC.ScanResultAddress, 2);
-
-                    LogManager.LogDebug("PLC反馈 | D520=2 (扫码NG)");
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"独立模式扫码流程异常 | 错误:{ex.Message}");
-
-                await commManager.WritePLCDRegister(
-                    commManager.GetCurrentConfig().PLC.ScanResultAddress, 2);
-            }
-            finally
-            {
-                // 复位D500
-                await commManager.WritePLCDRegister(
-                    commManager.GetCurrentConfig().PLC.ScanTriggerAddress, 0);
-                LogManager.LogDebug("PLC复位 | D500=0");
-
-                var duration = (DateTime.Now - startTime).TotalSeconds;
-                LogManager.LogInfo($"========== 独立模式扫码流程结束 | 条码:{barcode ?? "无"} | 结果:{(scanSuccess ? "成功" : "失败")} | 耗时:{duration:F1}秒 ==========");
-            }
-        }
-
-        /// <summary>
-        /// 独立模式拧紧流程 - 仅处理工序14数据
-        /// </summary>
-        private async Task ExecuteIndependentModeTightening()
-        {
-            var startTime = DateTime.Now;
-            bool dataGetSuccess = false;
-            string currentBarcode = null;
-
-            try
-            {
-                LogManager.LogInfo("========== 独立模式拧紧流程开始 ==========");
-
-                // 获取当前条码
-                currentBarcode = GetCurrentBarcode();
-                LogManager.LogInfo($"独立模式：条码获取 | {currentBarcode}");
-
-                OnProcessStatusChanged?.Invoke(currentBarcode, "拧紧触发（独立模式）- 读取数据");
-
-                // 检查心跳状态
-                if (!commManager.IsHeartbeatRunning())
-                {
-                    LogManager.LogError("心跳信号未运行，扫码流程可能未正常执行");
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "心跳异常，流程中断");
-
-                    // 保存降级数据
-                    await SaveIndependentModeFallbackData(currentBarcode, "心跳信号未运行");
-
-                    await commManager.WritePLCDRegister(commManager.GetCurrentConfig().PLC.TighteningResultAddress, 2);
-                    LogManager.LogDebug("PLC反馈 | D521=2 (心跳异常)");
-
-                    return;
-                }
-
-                LogManager.LogInfo("心跳状态检查通过，继续拧紧流程");
-
-                // 等待拧紧完成
-                OnProcessStatusChanged?.Invoke(currentBarcode, "等待拧紧完成（独立模式）...");
-                var tighteningResult = await WaitForTighteningCompletion();
-
-                if (tighteningResult != null)
-                {
-                    dataGetSuccess = true;
-
-                    // 日志记录
-                    if (tighteningResult.Success)
-                    {
-                        OnProcessStatusChanged?.Invoke(currentBarcode, $"拧紧完成 - 合格 (扭矩:{tighteningResult.Torque:F2}Nm)");
-                        LogManager.LogInfo($"独立模式：拧紧合格 | 条码:{currentBarcode} | 扭矩:{tighteningResult.Torque:F2}Nm");
-                    }
-                    else
-                    {
-                        OnProcessStatusChanged?.Invoke(currentBarcode, $"拧紧完成 - 不合格 ({tighteningResult.QualityResult})");
-                        LogManager.LogWarning($"独立模式：拧紧不合格 | 条码:{currentBarcode} | 原因:{tighteningResult.QualityResult}");
-                    }
-
-                    if (!tighteningResult.Success)
-                    {
-                        // 独立模式工序4 NG产品特殊处理
-                        LogManager.LogInfo($"独立模式：检测到工序4 NG产品，启动专用处理流程: {currentBarcode}");
-                        await ProcessProcess4NGProduct(currentBarcode, tighteningResult);
-
-                        // D521 = 1: 数据已获取并处理
-                        await commManager.WritePLCDRegister(commManager.GetCurrentConfig().PLC.TighteningResultAddress, 1);
-                        LogManager.LogDebug("PLC反馈 | D521=1 (NG产品数据已处理)");
-
-                        return; // 提前返回，不再执行后续正常流程
-                    }
-
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "保存数据中（独立模式）...");
-
-                    // 生成工序14数据
-                    var tailProcessData = GenerateTailProcessData(currentBarcode, tighteningResult);
-
-                    // 独立模式：仅包含工序14的数组
-                    var completeData = $"[{tailProcessData}]";
-
-                    // 保存到数据库（前3道工序为空）
-                    await dataManager.SaveProductData(
-                        currentBarcode,
-                        new string[0],     // 前3道工序数据为空数组
-                        tailProcessData,   // 工序4数据
-                        completeData       // 完整数据仅包含工序4
-                    );
-
-                    // 保存到本地文件（前3道工序为null）
-                    await LocalFileManager.SaveProductionData(
-                        currentBarcode,
-                        null,             // 工序1为null
-                        null,             // 工序2为null
-                        null,             // 工序3为null
-                        tailProcessData   // 工序4数据
-                    );
-
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "数据已保存（独立模式）");
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "上传MES数据中（独立模式）...");
-                    // 上传到服务器
-                    bool uploadSuccess = await dataManager.UploadToServer(currentBarcode, completeData);
-
-                    if (uploadSuccess)
-                    {
-                        OnProcessStatusChanged?.Invoke(currentBarcode, "上传成功 - 流程完成（独立模式）");
-                        LogManager.LogInfo($"独立模式数据已处理 | 条码:{currentBarcode} | 合格:{tighteningResult.Success} | 数据库:✓ | 文件:✓ | 上传:✓");
-                    }
-                    else
-                    {
-                        OnProcessStatusChanged?.Invoke(currentBarcode, "上传失败 - 已加入重试队列");
-                        LogManager.LogInfo($"独立模式数据已处理 | 条码:{currentBarcode} | 合格:{tighteningResult.Success} | 数据库:✓ | 文件:✓ | 上传:✗");
-                    }
-
-                    // D521 = 1: 数据获取成功
-                    await commManager.WritePLCDRegister(commManager.GetCurrentConfig().PLC.TighteningResultAddress, 1);
-                    LogManager.LogDebug("PLC反馈 | D521=1 (数据获取成功)");
-                }
-                else
-                {
-                    dataGetSuccess = false;
-                    LogManager.LogError($"独立模式：拧紧数据获取失败 | 条码:{currentBarcode} | 原因:超时或通信异常");
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "拧紧数据获取失败（独立模式）");
-
-                    // 保存降级数据
-                    await SaveIndependentModeFallbackData(currentBarcode, "拧紧数据获取超时或通信异常");
-
-                    // D521 = 2: 数据获取失败
-                    await commManager.WritePLCDRegister(commManager.GetCurrentConfig().PLC.TighteningResultAddress, 2);
-                    LogManager.LogDebug("PLC反馈 | D521=2 (数据获取失败)");
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"独立模式拧紧流程异常 | 错误:{ex.Message}");
-
-                // 异常也保存降级数据
-                await SaveIndependentModeFallbackData(currentBarcode ?? "UNKNOWN", $"流程异常: {ex.Message}");
-
-                await commManager.WritePLCDRegister(commManager.GetCurrentConfig().PLC.TighteningResultAddress, 2);
-            }
-            finally
-            {
-                // 复位D501
-                await commManager.WritePLCDRegister(
-                    commManager.GetCurrentConfig().PLC.TighteningTriggerAddress, 0);
-                LogManager.LogDebug("PLC复位 | D501=0");
-
-                // 清空条码缓存，准备下一个产品
-                ClearBarcodeCache();
-
-                OnCurrentProductChanged?.Invoke("", "等待扫码（独立模式）...");
-                OnProcessStatusChanged?.Invoke("", "系统运行中（独立模式）- 等待扫码");
-                var duration = (DateTime.Now - startTime).TotalSeconds;
-                LogManager.LogInfo($"========== 独立模式拧紧流程结束 | 条码:{currentBarcode ?? "UNKNOWN"} | 数据获取:{(dataGetSuccess ? "成功" : "失败")} | 耗时:{duration:F1}秒 ==========");
-            }
-        }
-
-        /// <summary>
-        /// 保存独立模式降级数据（拧紧数据获取失败时）
-        /// </summary>
-        private async Task SaveIndependentModeFallbackData(string barcode, string errorReason)
-        {
-            try
-            {
-                LogManager.LogWarning($"独立模式：保存降级数据 | 条码:{barcode} | 原因:{errorReason}");
-
-                // 生成降级的工序4数据
-                var fallbackData = GenerateFallbackData(barcode, errorReason);
-
-                // 独立模式：完整数据仅包含工序4
-                var completeData = $"[{fallbackData}]";
-
-                // 保存到数据库（前3道工序为空）
-                await dataManager.SaveProductData(
-                    barcode,
-                    new string[0],     // 前3道工序为空数组
-                    fallbackData,      // 工序4为异常数据
-                    completeData
-                );
-
-                // 保存到本地文件
-                await LocalFileManager.SaveProductionData(
-                    barcode,
-                    null,             // 工序1为null
-                    null,             // 工序2为null
-                    null,             // 工序3为null
-                    fallbackData      // 工序4异常数据
-                );
-
-                LogManager.LogInfo($"独立模式：降级数据保存成功 | 条码:{barcode}");
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"独立模式：保存降级数据失败 | 条码:{barcode} | 错误:{ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 完整流程模式扫码流程 - 检查数据完整性
-        /// </summary>
-        private async Task ExecuteFullProcessModeScan()
-        {
-            var startTime = DateTime.Now;
-            string barcode = null;
-            bool scanSuccess = false;
-
-            try
-            {
-                LogManager.LogInfo("========== 完整流程模式扫码流程开始 ==========");
-                OnProcessStatusChanged?.Invoke("", "扫码触发 - 开始扫码流程");
-
-                // 清空旧缓存
-                lock (barcodeLock)
-                {
-                    if (!string.IsNullOrEmpty(cachedBarcode))
-                    {
-                        LogManager.LogInfo($"清空旧的扫码缓存: {cachedBarcode}");
-                        cachedBarcode = null;
-                    }
-                }
-
-                // 清理等待任务
-                lock (barcodeTaskLock)
-                {
-                    if (barcodeWaitTask != null)
-                    {
-                        try
+                        // 检查是否有旧条码正在监控
+                        if (!string.IsNullOrEmpty(_currentProductBarcode) && _currentProductBarcode != barcode)
                         {
-                            if (!barcodeWaitTask.Task.IsCompleted)
+                            LogManager.LogWarning($"⚠ 新产品扫码 | 旧产品:{_currentProductBarcode} 监控将被取消 | 新产品:{barcode}");
+
+                            // 取消旧监控
+                            if (_currentMonitoringCts != null && !_currentMonitoringCts.IsCancellationRequested)
                             {
-                                barcodeWaitTask.TrySetCanceled();
-                            }
-                        }
-                        catch { }
-                        barcodeWaitTask = null;
-                        LogManager.LogDebug("已清理旧的扫码等待任务");
-                    }
-                }
-
-                if (!commManager.IsHeartbeatRunning())
-                {
-                    LogManager.LogWarning("心跳信号未运行，可能影响PLC通讯");
-                }
-
-                // 执行扫码
-                barcode = await WaitForBarcodeScanWithRetry();
-
-                if (!string.IsNullOrWhiteSpace(barcode))
-                {
-                    scanSuccess = true;
-
-                    OnProcessStatusChanged?.Invoke(barcode, "扫码成功 - 验证数据完整性...");
-
-                    // 数据完整性检查
-                    bool dataReady = false;
-                    bool isNGProduct = false;
-                    string ngProcessId = null;
-
-                    // 先检查是否是NG产品
-                    if (productDataBuffers.TryGetValue(barcode, out var buffer))
-                    {
-                        lock (buffer)
-                        {
-                            if (buffer.IsNG)
-                            {
-                                isNGProduct = true;
-                                ngProcessId = buffer.NGProcessId;
+                                _currentMonitoringCts.Cancel();
+                                LogManager.LogInfo($"✓ 已取消旧产品监控任务");
                             }
                         }
 
-                        if (isNGProduct)
-                        {
-                            LogManager.LogError($"产品 {barcode} 已标记为NG（工序{ngProcessId}），不应到达此工位");
-                            OnCurrentProductChanged?.Invoke(barcode, $"【NG】工序{ngProcessId}不合格");
-                            OnProcessStatusChanged?.Invoke(barcode, $"该产品已NG (工序{ngProcessId}) - 请检查");
-
-                            await commManager.WritePLCDRegister(
-                                commManager.GetCurrentConfig().PLC.ScanResultAddress, 2);
-                            LogManager.LogDebug("PLC反馈 | D520=2 (NG产品)");
-                            return;
-                        }
-
-                        // 等待数据收齐
-                        dataReady = await WaitForCompleteData(barcode);
+                        // 创建新的取消令牌
+                        _currentMonitoringCts = new CancellationTokenSource();
                     }
-                    else
-                    {
-                        LogManager.LogWarning($"产品 {barcode} 不在缓存中，可能是新产品或数据未到达");
-
-                        OnProcessStatusChanged?.Invoke(barcode, "未找到产品数据 - 等待接收...");
-                        // 给一个机会等待数据
-                        await Task.Delay(1000);
-                        dataReady = await WaitForCompleteData(barcode);
-                    }
-
-                    if (!dataReady)
-                    {
-                        LogManager.LogError($"产品 {barcode} 数据未收齐，无法继续");
-                        OnCurrentProductChanged?.Invoke(barcode, "数据未收齐");
-                        OnProcessStatusChanged?.Invoke(barcode, "前3道工序数据未收齐 - 无法继续");
-
-                        await commManager.WritePLCDRegister(
-                            commManager.GetCurrentConfig().PLC.ScanResultAddress, 2);
-                        LogManager.LogDebug("PLC反馈 | D520=2 (数据未收齐)");
-                        return;
-                    }
-
-                    OnProcessStatusChanged?.Invoke(barcode, "数据验证通过 (3/3) - 等待拧紧触发");
-
-                    // 数据就绪，缓存条码
+                    // 缓存条码
                     lock (_barcodeCacheLock)
                     {
                         _currentProductBarcode = barcode;
                         LogManager.LogInfo($"条码已缓存: {barcode}");
                     }
-
                     OnCurrentProductChanged?.Invoke(barcode, "扫码成功");
+                    OnProcessStatusChanged?.Invoke(barcode, "扫码成功 - 开始监控拧紧");
                     LogManager.LogInfo($"扫码成功 | 条码:{barcode}");
+                    // 反馈PLC扫码成功（D520=1）
+                    await SafeWritePLCRegister(commManager.GetCurrentConfig().PLC.ScanResultAddress, 1, "扫码OK");
+                    //使用新的取消令牌启动监控 
+                    CancellationTokenSource currentCts;
+                    lock (_monitoringCtsLock)
+                    {
+                        currentCts = _currentMonitoringCts;
+                    }
 
-                    await commManager.WritePLCDRegister(
-                        commManager.GetCurrentConfig().PLC.ScanResultAddress, 1);
-
-                    LogManager.LogDebug("PLC反馈 | D520=1 (扫码OK)");
+                    _ = Task.Run(() => MonitorTighteningCompletion(barcode, currentCts.Token), currentCts.Token);
+                    LogManager.LogInfo($"已启动拧紧轴监控任务 | 条码:{barcode}");
                 }
                 else
                 {
                     scanSuccess = false;
                     LogManager.LogError("扫码失败 | 原因:条码为空");
 
-                    await commManager.WritePLCDRegister(
-                        commManager.GetCurrentConfig().PLC.ScanResultAddress, 2);
-                    LogManager.LogDebug("PLC反馈 | D520=2 (扫码NG)");
+                    // 反馈PLC扫码失败（D520=2）
+                    await SafeWritePLCRegister(commManager.GetCurrentConfig().PLC.ScanResultAddress, 2, "扫码失败");
                 }
+            }
+            catch (TimeoutException timeoutEx)
+            {
+                // 专门处理超时异常
+                scanSuccess = false;
+                LogManager.LogError($"扫码超时 | 错误:{timeoutEx.Message}");
+                OnProcessStatusChanged?.Invoke("", "扫码超时 - 已达最大重试次数");
+
+                // 反馈PLC扫码失败（D520=2）+ 记录日志
+                await SafeWritePLCRegister(commManager.GetCurrentConfig().PLC.ScanResultAddress, 2, "扫码超时");
+            }
+            catch (OperationCanceledException cancelEx)
+            {
+                scanSuccess = false;
+                LogManager.LogWarning($"扫码流程被取消 | 原因:{cancelEx.Message}");
+                OnProcessStatusChanged?.Invoke("", "扫码已取消");
+
+                // 反馈PLC扫码失败（D520=2）
+                await SafeWritePLCRegister(commManager.GetCurrentConfig().PLC.ScanResultAddress, 2, "扫码取消");
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"完整流程模式扫码流程异常 | 错误:{ex.Message}");
+                scanSuccess = false;
+                LogManager.LogError($"扫码流程异常 | 类型:{ex.GetType().Name} | 错误:{ex.Message}");
+                OnProcessStatusChanged?.Invoke("", $"扫码异常 - {ex.Message}");
 
-                await commManager.WritePLCDRegister(
-                    commManager.GetCurrentConfig().PLC.ScanResultAddress, 2);
+                await SafeWritePLCRegister(commManager.GetCurrentConfig().PLC.ScanResultAddress, 2, "扫码异常");
             }
             finally
             {
-                await commManager.WritePLCDRegister(
-                    commManager.GetCurrentConfig().PLC.ScanTriggerAddress, 0);
-                LogManager.LogDebug("PLC复位 | D500=0");
+                await SafeWritePLCRegister(commManager.GetCurrentConfig().PLC.ScanTriggerAddress, 0, "D500复位");
 
                 var duration = (DateTime.Now - startTime).TotalSeconds;
+                LogManager.LogInfo($"========== 扫码流程结束 | 条码:{barcode ?? "无"} | 结果:{(scanSuccess ? "成功" : "失败")} | 耗时:{duration:F1}秒 ==========");
+            }
+        }
 
-                LogManager.LogInfo($"========== 完整流程模式扫码流程结束 | 条码:{barcode ?? "无"} | 结果:{(scanSuccess ? "成功" : "失败")} | 耗时:{duration:F1}秒 ==========");
+        #region 拧紧轴主动监控
+
+        /// <summary>
+        /// 监控拧紧轴直到检测到完成状态
+        /// </summary>
+        private async Task MonitorTighteningCompletion(string barcode, CancellationToken monitorCts)
+        {
+            var startTime = DateTime.Now;
+            var pollInterval = 500;
+
+            bool hasSeenWorkingState = false;
+            int? firstStatusCode = null;
+            int consecutiveCompletedCount = 0;
+
+            //扭矩变化检测
+            float lastTorque = -1f; // 初始值设为-1，表示未初始化
+            bool torqueHasChanged = false;
+            DateTime lastTorqueChangeTime = DateTime.MinValue;
+
+            // 日志控制
+            DateTime lastWarningTime = DateTime.MinValue;
+            DateTime lastUnknownStatusWarning = DateTime.MinValue;
+
+            try
+            {
+                LogManager.LogInfo($"========== 拧紧监控开始 | 条码:{barcode} | 模式:持续监控（扭矩变化检测）==========");
+                OnProcessStatusChanged?.Invoke(barcode, "监控拧紧中...");
+
+                while (GetRunningState() && !monitorCts.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var tighteningData = await commManager.ReadTighteningAxisData();
+
+                        if (tighteningData == null)
+                        {
+                            LogManager.LogWarning("拧紧轴数据读取失败，500ms后重试");
+                            await Task.Delay(pollInterval, monitorCts);
+                            continue;
+                        }
+
+                        int currentStatus = tighteningData.StatusCode;
+                        float currentTorque = tighteningData.CompletedTorque;
+
+                        // 记录第一次读取的状态 
+                        if (firstStatusCode == null)
+                        {
+                            firstStatusCode = currentStatus;
+                            lastTorque = currentTorque;
+
+                            LogManager.LogInfo($"首次读取拧紧轴状态: {currentStatus} ({tighteningData.GetStatusDisplayName()}) | " +
+                                              $"扭矩:{currentTorque:F2}Nm | 条码:{barcode}");
+
+                            if (tighteningData.IsOperationCompleted)
+                            {
+                                LogManager.LogWarning($"⚠ 首次读取即为完成状态，确认为残留数据，等待状态归零或扭矩变化...");
+                            }
+                        }
+
+                        // 扭矩变化检测（关键优化点）
+                        if (lastTorque >= 0 && Math.Abs(currentTorque - lastTorque) > 0.5f)
+                        {
+                            if (!torqueHasChanged)
+                            {
+                                torqueHasChanged = true;
+                                lastTorqueChangeTime = DateTime.Now;
+                                LogManager.LogInfo($"✓ 检测到扭矩变化 | {lastTorque:F2}Nm → {currentTorque:F2}Nm | " +
+                                                  $"条码:{barcode} | 确认设备开始活动");
+                            }
+                            lastTorque = currentTorque;
+                        }
+                        else if (lastTorque < 0)
+                        {
+                            // 首次初始化
+                            lastTorque = currentTorque;
+                        }
+
+                        // 标记已进入工作状态（扩展判断）
+                        if (currentStatus == 0 ||       // 空闲
+                            currentStatus == 1 ||       // 运行中
+                            currentStatus == 500 ||     // 回零中
+                            currentStatus == 1000 ||    // 执行命令中
+                            torqueHasChanged)           // 扭矩发生变化
+                        {
+                            if (!hasSeenWorkingState)
+                            {
+                                hasSeenWorkingState = true;
+
+                                string trigger = torqueHasChanged ?
+                                    $"扭矩变化({lastTorque:F2}Nm)" :
+                                    $"状态变化({currentStatus})";
+
+                                LogManager.LogInfo($"✓ 拧紧轴进入工作状态 | 触发条件:{trigger} | 条码:{barcode}");
+                            }
+
+                            consecutiveCompletedCount = 0;
+                        }
+
+                        // 未知状态检测 
+                        var knownStatuses = new[] { 0, 1, 11, 21, 22, 23, 24, 25, 500, 1000 };
+                        if (!knownStatuses.Contains(currentStatus))
+                        {
+                            if ((DateTime.Now - lastUnknownStatusWarning).TotalSeconds >= 60)
+                            {
+                                LogManager.LogWarning($"⚠ 检测到未知拧紧轴状态码: {currentStatus} | 条码:{barcode} | " +
+                                                    $"扭矩:{currentTorque:F2}Nm | 如持续出现请检查设备配置");
+                                lastUnknownStatusWarning = DateTime.Now;
+                            }
+                        }
+
+                        // 运行中UI更新 
+                        if (tighteningData.IsRunning)
+                        {
+                            OnProcessStatusChanged?.Invoke(barcode,
+                                $"拧紧中 (实时扭矩:{currentTorque:F2}Nm)");
+                        }
+
+                        // 检查完成状态 
+                        if (tighteningData.IsOperationCompleted)
+                        {
+                            consecutiveCompletedCount++;
+
+                            // 必须先经历工作状态
+                            if (!hasSeenWorkingState)
+                            {
+                                bool shouldLogWarning = false;
+                                string logReason = "";
+
+                                if (consecutiveCompletedCount == 1)
+                                {
+                                    // 第1次：立即输出
+                                    shouldLogWarning = true;
+                                    logReason = "首次检测残留数据";
+                                    lastWarningTime = DateTime.Now;
+                                }
+                                else if (consecutiveCompletedCount == 10)
+                                {
+                                    // 第10次（5秒后）：确认持续残留
+                                    shouldLogWarning = true;
+                                    logReason = "持续残留，等待设备活动";
+                                    lastWarningTime = DateTime.Now;
+                                }
+                                else if ((DateTime.Now - lastWarningTime).TotalSeconds >= 60)
+                                {
+                                    // 之后每60秒输出一次
+                                    shouldLogWarning = true;
+                                    logReason = "长时间等待提醒";
+                                    lastWarningTime = DateTime.Now;
+                                }
+
+                                if (shouldLogWarning)
+                                {
+                                    var elapsedSeconds = (DateTime.Now - startTime).TotalSeconds;
+                                    var elapsedMinutes = elapsedSeconds / 60;
+
+                                    LogManager.LogWarning($"⚠ [第{consecutiveCompletedCount}次] 检测到完成状态但未经历工作过程 | " +
+                                                        $"状态:{currentStatus} ({tighteningData.GetStatusDisplayName()}) | " +
+                                                        $"扭矩:{currentTorque:F2}Nm | " +
+                                                        $"条码:{barcode} | " +
+                                                        $"原因:{logReason} | " +
+                                                        $"已等待:{elapsedMinutes:F1}分钟({elapsedSeconds:F0}秒)");
+                                }
+                                else
+                                {
+                                    // 其他时候只输出Debug
+                                    LogManager.LogDebug($"[第{consecutiveCompletedCount}次] 仍为残留数据 | 状态:{currentStatus} | 扭矩:{currentTorque:F2}Nm");
+                                }
+
+                                await Task.Delay(pollInterval, monitorCts);
+                                continue;
+                            }
+
+                            // 已经历工作状态，记录完成日志
+                            LogManager.LogInfo($"✓ 检测到拧紧完成（有效数据）| " +
+                                              $"状态:{currentStatus} ({tighteningData.GetStatusDisplayName()}) | " +
+                                              $"扭矩:{currentTorque:F2}Nm | " +
+                                              $"角度:{Math.Abs(tighteningData.CompletedAngle):F1}° | " +
+                                              $"结果:{tighteningData.QualityResult} | " +
+                                              $"条码:{barcode}");
+
+                            // 验证数据有效性
+                            if (ValidateTighteningData(tighteningData))
+                            {
+                                await ProcessCompletedTighteningData(barcode, tighteningData);
+                                return; 
+                            }
+                            else
+                            {
+                                LogManager.LogWarning("拧紧数据验证失败，继续监控");
+                            }
+                        }
+
+                        // 长时间监控周期提醒（每2分钟）
+                        var elapsed = (DateTime.Now - startTime).TotalSeconds;
+                        if (elapsed >= 120 && elapsed % 120 < 0.5)
+                        {
+                            LogManager.LogInfo($"[持续监控] 条码:{barcode} | 已监控:{elapsed / 60:F1}分钟({elapsed:F0}秒) | " +
+                                              $"当前状态:{currentStatus} ({tighteningData.GetStatusDisplayName()}) | " +
+                                              $"扭矩:{currentTorque:F2}Nm | " +
+                                              $"是否见过工作状态:{hasSeenWorkingState} | " +
+                                              $"扭矩是否变化:{torqueHasChanged}");
+                        }
+
+                        await Task.Delay(pollInterval, monitorCts);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        LogManager.LogInfo($"拧紧监控被取消（新产品扫码或系统停止）| 条码:{barcode}");
+                        return; 
+                    }
+                    catch (Exception ex)
+                    {
+                        LogManager.LogError($"拧紧监控异常: {ex.Message}");
+                        await Task.Delay(pollInterval, monitorCts);
+                    }
+                }
+
+                LogManager.LogInfo($"系统已停止，监控任务退出 | 条码:{barcode}");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"拧紧监控任务异常 | 条码:{barcode} | 错误:{ex.Message}");
+
+                // 只在真正异常时保存降级数据
+                if (!monitorCts.IsCancellationRequested && GetRunningState())
+                {
+                    await SaveFallbackData(barcode, $"监控异常: {ex.Message}");
+                }
+            }
+            finally
+            {
+                var duration = (DateTime.Now - startTime).TotalSeconds;
+                LogManager.LogInfo($"========== 拧紧监控结束 | 条码:{barcode} | 耗时:{duration / 60:F1}分钟({duration:F0}秒) ==========");
+
+                ClearBarcodeCache();
+                OnCurrentProductChanged?.Invoke("", "等待扫码...");
             }
         }
 
         /// <summary>
-        /// 完整流程模式拧紧流程 - 合并4道工序数据
+        /// 处理拧紧完成的数据
         /// </summary>
-        private async Task ExecuteFullProcessModeTightening()
+        private async Task ProcessCompletedTighteningData(string barcode, TighteningAxisData tighteningData)
         {
-            var startTime = DateTime.Now;
-            bool dataGetSuccess = false;
-            string currentBarcode = null;
-
             try
             {
-                LogManager.LogInfo("========== 完整流程模式拧紧流程开始 ==========");
+                LogManager.LogInfo($"开始处理拧紧数据 | 条码:{barcode} | 合格:{tighteningData.IsQualified}");
 
-                currentBarcode = GetCurrentBarcode();
-                LogManager.LogInfo($"条码获取 | {currentBarcode}");
-
-                OnProcessStatusChanged?.Invoke(currentBarcode, "拧紧触发 - 准备读取数据");
-                if (!commManager.IsHeartbeatRunning())
+                // 判断是否为NG产品
+                if (!tighteningData.IsQualified)
                 {
-                    LogManager.LogError("心跳信号未运行，扫码流程可能未正常执行");
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "心跳异常，流程中断");
-
-                    // 保存降级数据
-                    await SaveFallbackData(currentBarcode, "心跳信号未运行");
-
-                    await commManager.WritePLCDRegister(
-                        commManager.GetCurrentConfig().PLC.TighteningResultAddress, 2);
-                    LogManager.LogDebug("PLC反馈 | D521=2 (心跳异常)");
-
+                    LogManager.LogInfo($"检测到UNPASS产品 | 条码:{barcode} | 原因:{tighteningData.QualityResult}");
+                    await ProcessProcess4NGProduct(barcode, tighteningData);
                     return;
                 }
 
-                LogManager.LogInfo("心跳状态检查通过，继续拧紧流程");
+                // PASS产品处理
+                OnProcessStatusChanged?.Invoke(barcode, "拧紧合格 - 保存数据中...");
 
-                OnProcessStatusChanged?.Invoke(currentBarcode, "等待拧紧完成...");
-                var tighteningResult = await WaitForTighteningCompletion();
+                // 生成工序14数据
+                var tailProcessData = GenerateTailProcessData(barcode, tighteningData);
+                var completeData = tailProcessData;
 
-                if (tighteningResult != null)
+                // 保存到数据库
+                await dataManager.SaveProductData(
+                    barcode,
+                    tailProcessData,
+                    completeData,
+                    isNG: false,
+                    ngProcessId: null
+                );
+
+                // 保存到本地文件
+                await SaveProductDataToFile(barcode, tailProcessData);
+
+                OnProcessStatusChanged?.Invoke(barcode, "数据已保存 - 上传MES中...");
+
+                // 上传到MES服务器
+                bool uploadSuccess = await dataManager.UploadToServer(barcode, completeData);
+
+                if (uploadSuccess)
                 {
-                    dataGetSuccess = true;
-
-                    // 日志记录
-                    if (tighteningResult.Success)
-                    {
-                        OnProcessStatusChanged?.Invoke(currentBarcode, $"拧紧完成 - 合格 (扭矩:{tighteningResult.Torque:F2}Nm)");
-                        LogManager.LogInfo($"拧紧合格 | 条码:{currentBarcode} | 扭矩:{tighteningResult.Torque:F2}Nm");
-                    }
-                    else
-                    {
-                        OnProcessStatusChanged?.Invoke(currentBarcode, $"拧紧完成 - 不合格 ({tighteningResult.QualityResult})");
-                        LogManager.LogWarning($"拧紧不合格 | 条码:{currentBarcode} | 原因:{tighteningResult.QualityResult}");
-                    }
-
-                    if (!tighteningResult.Success)
-                    {
-                        // 工序4 NG产品特殊处理
-                        LogManager.LogInfo($"检测到工序4 NG产品，启动专用处理流程: {currentBarcode}");
-                        await ProcessProcess4NGProduct(currentBarcode, tighteningResult);
-
-                        // D521 = 1: 数据已获取并处理
-                        await commManager.WritePLCDRegister(
-                            commManager.GetCurrentConfig().PLC.TighteningResultAddress, 1);
-                        LogManager.LogDebug("PLC反馈 | D521=1 (NG产品数据已处理)");
-
-                        return; // 提前返回，不再执行后续正常流程
-                    }
-
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "保存数据中...");
-
-                    // 原有逻辑：仅对合格品执行
-                    var processDataArray = SafeGetProcessData();
-                    var tailProcessData = GenerateTailProcessData(currentBarcode, tighteningResult);
-                    var completeData = CombineAllProcessData(tailProcessData, processDataArray);
-
-                    // 保存到数据库
-                    await dataManager.SaveProductData(
-                        currentBarcode, processDataArray, tailProcessData, completeData);
-
-                    // 保存本地文件（正常目录）
-                    await LocalFileManager.SaveProductionData(
-                        currentBarcode,
-                        processDataArray.Length > 0 ? processDataArray[0] : null,
-                        processDataArray.Length > 1 ? processDataArray[1] : null,
-                        processDataArray.Length > 2 ? processDataArray[2] : null,
-                        tailProcessData
-                    );
-
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "数据已保存 (数据库✓ 文件✓)");
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "上传MES数据中...");
-
-                    bool uploadSuccess = await dataManager.UploadToServer(currentBarcode, completeData);
-
-                    if (uploadSuccess)
-                    {
-                        OnProcessStatusChanged?.Invoke(currentBarcode, "上传成功 - 流程完成");
-                        LogManager.LogInfo($"数据已处理 | 条码:{currentBarcode} | 合格:{tighteningResult.Success} | 数据库:✓ | 文件:✓ | 上传:✓");
-                    }
-                    else
-                    {
-                        OnProcessStatusChanged?.Invoke(currentBarcode, "上传失败 - 已加入重试队列");
-                        LogManager.LogInfo($"数据已处理 | 条码:{currentBarcode} | 合格:{tighteningResult.Success} | 数据库:✓ | 文件:✓ | 上传:✗");
-                    }
-
-                    // D521 = 1: 数据获取成功
-                    await commManager.WritePLCDRegister(commManager.GetCurrentConfig().PLC.TighteningResultAddress, 1);
-                    LogManager.LogDebug("PLC反馈 | D521=1 (数据获取成功)");
+                    OnProcessStatusChanged?.Invoke(barcode, "上传成功 - 流程完成");
+                    LogManager.LogInfo($"数据处理完成 | 条码:{barcode} | 合格:✓ | 上传:✓");
                 }
-
                 else
                 {
-                    // 数据获取失败（超时/通信异常）
-                    dataGetSuccess = false;
-                    LogManager.LogError($"拧紧数据获取失败 | 条码:{currentBarcode} | 原因:超时或通信异常");
-                    OnProcessStatusChanged?.Invoke(currentBarcode, "拧紧数据获取失败");
-
-                    // 保存降级数据
-                    await SaveFallbackData(currentBarcode, "拧紧数据获取超时或通信异常");
-
-                    // D521 = 2: 数据获取失败
-                    await commManager.WritePLCDRegister(
-                        commManager.GetCurrentConfig().PLC.TighteningResultAddress, 2);
-                    LogManager.LogDebug("PLC反馈 | D521=2 (数据获取失败)");
+                    OnProcessStatusChanged?.Invoke(barcode, "上传失败 - 已加入重试队列");
+                    LogManager.LogWarning($"数据上传失败 | 条码:{barcode} | 已加入重试队列");
                 }
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"完整流程模式拧紧流程异常 | 错误:{ex.Message}");
-                // 异常也保存降级数据
-                await SaveFallbackData(currentBarcode ?? "UNKNOWN", $"流程异常: {ex.Message}");
-                await commManager.WritePLCDRegister(
-                    commManager.GetCurrentConfig().PLC.TighteningResultAddress, 2);
-            }
-            finally
-            {
-                // 复位D501
-                await commManager.WritePLCDRegister(
-                    commManager.GetCurrentConfig().PLC.TighteningTriggerAddress, 0);
-                LogManager.LogDebug("PLC复位 | D501=0");
-
-                // 清空条码缓存，准备下一个产品
-                ClearBarcodeCache();
-
-                OnCurrentProductChanged?.Invoke("", "等待产品数据...");
-                OnProcessStatusChanged?.Invoke("", "系统运行中 - 等待产品数据");
-                var duration = (DateTime.Now - startTime).TotalSeconds;
-                LogManager.LogInfo($"========== 完整流程模式拧紧流程结束 | 条码:{currentBarcode ?? "UNKNOWN"} | 数据获取:{(dataGetSuccess ? "成功" : "失败")} | 耗时:{duration:F1}秒 ==========");
+                LogManager.LogError($"处理拧紧数据异常 | 条码:{barcode} | 错误:{ex.Message}");
+                await SaveFallbackData(barcode, $"数据处理异常: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// 清空产品数据缓存（工作模式切换时调用）
+        /// 验证拧紧数据有效性（简化版）
         /// </summary>
-        public void ClearProductDataBuffers()
+        private bool ValidateTighteningData(TighteningAxisData data)
+        {
+            if (data == null)
+            {
+                LogManager.LogWarning("数据验证失败：数据为null");
+                return false;
+            }
+
+            // 1. 必须已完成（状态码=11或21~30）
+            if (!data.IsOperationCompleted)
+            {
+                LogManager.LogDebug($"数据验证失败：未完成状态（状态码={data.StatusCode}）");
+                return false;
+            }
+
+            // 2. 必须有完成扭矩
+            if (data.CompletedTorque <= 0)
+            {
+                LogManager.LogDebug("数据验证失败：完成扭矩为0");
+                return false;
+            }
+
+            // 3. 角度验证（容忍负值，只记录警告）
+            var absoluteAngle = Math.Abs(data.CompletedAngle);
+            if (absoluteAngle > 5000)  // 假设5000度为异常阈值
+            {
+                LogManager.LogWarning($"角度数据异常(绝对值:{absoluteAngle:F1}°)，但不阻止流程");
+            }
+
+            // 4. 扭矩必须在合理范围内
+            if (data.CompletedTorque > 100)
+            {
+                LogManager.LogWarning($"扭矩数据超出合理范围({data.CompletedTorque:F2}Nm)");
+            }
+
+            LogManager.LogDebug($"拧紧数据验证通过 | " +
+                              $"扭矩:{data.CompletedTorque:F2}Nm | " +
+                              $"角度:{absoluteAngle:F1}° | " +
+                              $"状态:{data.GetStatusDisplayName()} | " +
+                              $"结果:{data.QualityResult}");
+
+            return true;
+        }
+
+        #endregion
+
+        /// <summary>
+        /// 安全地写入PLC寄存器（带日志和异常处理）
+        /// </summary>
+        private async Task SafeWritePLCRegister(string address, int value, string description, int maxRetries = 2)
+        {
+            int attempt = 0;
+
+            while (attempt < maxRetries)
+            {
+                attempt++;
+
+                try
+                {
+                    if (attempt == 1)
+                    {
+                        LogManager.LogInfo($"PLC反馈 | 准备写入 {address}={value} ({description})");
+                    }
+                    else
+                    {
+                        // 重试前等待更长时间，避免连续失败
+                        LogManager.LogInfo($"PLC反馈 | 等待{300}ms后重试...");
+                        await Task.Delay(300);
+
+                        LogManager.LogInfo($"PLC反馈 | 重试写入 {address}={value} ({description}) - 第{attempt}次");
+                    }
+
+                    bool success = await commManager.WritePLCDRegister(address, value);
+
+                    if (success)
+                    {
+                        LogManager.LogInfo($"PLC反馈 | {address}={value} ({description}) ✓写入成功");
+                        return; // 成功立即返回
+                    }
+                    else
+                    {
+                        LogManager.LogWarning($"PLC反馈 | {address}={value} ({description}) ✗写入失败 (尝试{attempt}/{maxRetries})");
+
+                        // 第1次失败后立即重试（不等待）
+                        if (attempt == 1)
+                        {
+                            await Task.Delay(100); // 短暂延迟
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"PLC反馈异常 | {address}={value} ({description}) | " +
+                                      $"尝试{attempt}/{maxRetries} | " +
+                                      $"错误:{ex.Message}");
+
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(500); // 异常后等待更长时间
+                    }
+                }
+            }
+
+            LogManager.LogError($"PLC反馈最终失败 | {address}={value} ({description}) | 已重试{maxRetries}次");
+        }
+
+        /// <summary>
+        /// 保存产品数据到本地文件
+        /// </summary>
+        private async Task<bool> SaveProductDataToFile(string barcode, string processData)
         {
             try
             {
-                int oldCount = productDataBuffers.Count;
+                string baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProductionData");
+                string dateFolder = DateTime.Now.ToString("yyyy-MM-dd");
+                string passFolder = Path.Combine(baseDir, dateFolder, "PASS");
 
-                if (oldCount > 0)
+                if (!Directory.Exists(passFolder))
                 {
-                    // 记录被清空的产品列表
-                    var productCodes = productDataBuffers.Keys.ToList();
-
-                    productDataBuffers.Clear();
-
-                    LogManager.LogWarning($"已清空 {oldCount} 个产品缓存，产品码: {string.Join(", ", productCodes)}");
+                    Directory.CreateDirectory(passFolder);
+                    LogManager.LogDebug($"创建PASS文件夹: {passFolder}");
                 }
-                else
-                {
-                    LogManager.LogDebug("产品缓存为空，无需清空");
-                }
+
+                string fileName = $"{SanitizeFileName(barcode)}_PASS_Process14.json";
+                string filePath = Path.Combine(passFolder, fileName);
+
+                // 格式化JSON（数组格式）
+                var fileContent = processData;
+
+                await Task.Run(() => File.WriteAllText(filePath, fileContent, Encoding.UTF8));
+                LogManager.LogDebug($"产品文件已保存: {filePath}");
+                return true;
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"清空产品缓存异常: {ex.Message}");
-                throw;
+                LogManager.LogError($"保存产品文件失败: {ex.Message}");
+                return false;
             }
         }
-
 
         /// <summary>
         /// 保存降级数据（数据获取失败时）
@@ -1050,28 +846,20 @@ namespace TailInstallationSystem
                 // 生成降级的工序4数据
                 var fallbackData = GenerateFallbackData(barcode, errorReason);
 
-                // 获取前3道工序数据
-                var processDataArray = SafeGetProcessData();
-
-                // 合并完整数据
-                var completeData = CombineAllProcessData(fallbackData, processDataArray);
+                // 完整数据仅包含工序4
+                var completeData = fallbackData;
 
                 // 保存到数据库（标记为异常）
                 await dataManager.SaveProductData(
                     barcode,
-                    processDataArray,
                     fallbackData,  // 工序4为异常数据
-                    completeData
+                    completeData,
+                    isNG: true,    // 标记为异常
+                    ngProcessId: "13" // 异常发生在工序14
                 );
 
-                // 保存到本地文件
-                await LocalFileManager.SaveProductionData(
-                    barcode,
-                    processDataArray.Length > 0 ? processDataArray[0] : null,
-                    processDataArray.Length > 1 ? processDataArray[1] : null,
-                    processDataArray.Length > 2 ? processDataArray[2] : null,
-                    fallbackData
-                );
+                // 保存到NG文件夹
+                await SaveProcess4NGProductToFile(barcode, null, completeData);
 
                 LogManager.LogInfo($"降级数据保存成功 | 条码:{barcode}");
             }
@@ -1088,20 +876,152 @@ namespace TailInstallationSystem
         {
             var fallbackProcessData = new
             {
-                ProcessId = "14",
+                ProcessId = "13",
                 Code = barcode,
                 Data = new[]
                 {
-            new
-            {
-                ItemName = "尾椎安装",
-                Remark = $"扭矩：0Nm",
-                Result = "NG"
-            }
-        }
+                    new
+                    {
+                        ItemName = "尾椎安装",
+                        Remark = "扭矩：无",
+                        Result = "FAIL"
+                    }
+                }
             };
 
             return JsonConvert.SerializeObject(fallbackProcessData, Formatting.Indented);
+        }
+
+        /// <summary>
+        /// 处理工序4 NG产品
+        /// </summary>
+        private async Task ProcessProcess4NGProduct(string productCode, TighteningAxisData tighteningResult)
+        {
+            try
+            {
+                var startTime = DateTime.Now;
+                LogManager.LogInfo($"========== 开始处理工序4 UNPASS产品 ==========");
+                LogManager.LogInfo($"产品码: {productCode}");
+                LogManager.LogInfo($"UNPASS原因: {tighteningResult.QualityResult}");
+                LogManager.LogInfo($"完成扭矩: {tighteningResult.CompletedTorque:F2}Nm (目标: {tighteningResult.TargetTorque:F2}Nm)");
+                LogManager.LogInfo($"完成角度: {Math.Abs(tighteningResult.CompletedAngle):F1}°");
+
+                OnProcessStatusChanged?.Invoke(productCode, $"工序4 UNPASS产品处理中 ({tighteningResult.QualityResult})...");
+
+                // 生成工序14数据
+                var tailProcessData = GenerateTailProcessData(productCode, tighteningResult);
+                var completeData = tailProcessData;
+
+                // 1. 保存到数据库（标记工序4 NG）
+                OnProcessStatusChanged?.Invoke(productCode, "保存UNPASS产品数据 (工序4)...");
+                bool dbResult = await dataManager.SaveProductData(
+                    productCode,
+                    tailProcessData,
+                    completeData,
+                    isNG: true,
+                    ngProcessId: "13"
+                );
+
+                if (dbResult)
+                {
+                    LogManager.LogInfo($"UNPASS产品数据已保存到数据库: {productCode}");
+                }
+                else
+                {
+                    LogManager.LogError($"UNPASS产品数据保存数据库失败: {productCode}");
+                }
+
+                // 2. 保存到本地NG文件夹
+                bool fileResult = await SaveProcess4NGProductToFile(productCode, tighteningResult, completeData);
+
+                // 3. 上传到MES
+                OnProcessStatusChanged?.Invoke(productCode, "上传工序4 UNPASS产品数据到MES...");
+                bool uploadResult = await dataManager.UploadToServer(productCode, completeData);
+
+                if (uploadResult)
+                {
+                    LogManager.LogInfo($"UNPASS产品数据已上传到MES: {productCode}");
+                    OnProcessStatusChanged?.Invoke(productCode, "工序4 UNPASS产品已上传MES");
+                }
+                else
+                {
+                    LogManager.LogWarning($"UNPASS产品数据上传失败，已加入重试队列: {productCode}");
+                    OnProcessStatusChanged?.Invoke(productCode, "工序4 UNPASS产品上传失败 - 已加入重试队列");
+                }
+
+                var duration = (DateTime.Now - startTime).TotalSeconds;
+                LogManager.LogInfo($"工序4 UNPASS产品处理完成 | 产品:{productCode} | " +
+                                  $"数据库:{dbResult} | 文件:{fileResult} | 上传:{uploadResult} | 耗时:{duration:F1}秒");
+                LogManager.LogInfo($"========== 工序4 UNPASS产品处理结束 ==========");
+
+                OnProcessStatusChanged?.Invoke(productCode, $"工序4 UNPASS产品处理完成 ({tighteningResult.QualityResult})");
+                await Task.Delay(2000);
+
+                OnCurrentProductChanged?.Invoke("", "等待扫码...");
+                OnProcessStatusChanged?.Invoke("", "系统运行中 - 等待扫码");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"处理工序4 UNPASS产品异常: {ex.Message}");
+                LogManager.LogError($"异常堆栈: {ex.StackTrace}");
+                OnProcessStatusChanged?.Invoke(productCode, $"工序4 UNPASS产品处理异常 - {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 保存工序4 NG产品到本地文件
+        /// </summary>
+        private async Task<bool> SaveProcess4NGProductToFile(
+            string productCode,
+            TighteningAxisData tighteningResult,
+            string completeData)
+        {
+            try
+            {
+                string baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProductionData");
+                string dateFolder = DateTime.Now.ToString("yyyy-MM-dd");
+                string ngFolder = Path.Combine(baseDir, dateFolder, "UNPASS");
+
+                if (!Directory.Exists(ngFolder))
+                {
+                    Directory.CreateDirectory(ngFolder);
+                    LogManager.LogDebug($"创建UNPASS文件夹: {ngFolder}");
+                }
+
+                string fileName = $"{SanitizeFileName(productCode)}_UNPASS_Process14.json";
+                string filePath = Path.Combine(ngFolder, fileName);
+
+                await Task.Run(() => File.WriteAllText(filePath, completeData, Encoding.UTF8));
+                LogManager.LogDebug($"工序4 UNPASS产品文件已保存: {filePath}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"保存工序4 UNPASS产品文件失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 清理文件名中的非法字符
+        /// </summary>
+        private string SanitizeFileName(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+                return $"UNKNOWN_{DateTime.Now:HHmmss}";
+
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            foreach (char invalidChar in invalidChars)
+            {
+                fileName = fileName.Replace(invalidChar, '_');
+            }
+
+            if (fileName.Length > 50)
+            {
+                fileName = fileName.Substring(0, 50);
+            }
+
+            return fileName;
         }
 
         /// <summary>
@@ -1121,7 +1041,7 @@ namespace TailInstallationSystem
                 return "UNKNOWN";
             }
 
-            LogManager.LogDebug($"从缓存获取条码: {barcode}"); 
+            LogManager.LogDebug($"从缓存获取条码: {barcode}");
             return barcode;
         }
 
@@ -1132,7 +1052,10 @@ namespace TailInstallationSystem
         {
             lock (_barcodeCacheLock)
             {
-                LogManager.LogInfo($"清空条码缓存: {_currentProductBarcode}");
+                if (!string.IsNullOrEmpty(_currentProductBarcode))
+                {
+                    LogManager.LogDebug($"清空条码缓存: {_currentProductBarcode}");
+                }
                 _currentProductBarcode = null;
             }
         }
@@ -1145,653 +1068,79 @@ namespace TailInstallationSystem
             }
         }
 
-        //接收PC传输数据
-        private void ProcessReceivedData(string jsonData)
-        {
-            // 独立模式判断
-            if (GetCurrentWorkMode() == WorkMode.Independent)
-            {
-                LogManager.LogInfo($"独立模式：已忽略前端发送的工序数据（大小:{jsonData?.Length ?? 0}字节）");
-                return;
-            }
-
-            try
-            {
-                // 提取产品码和工序ID
-                string productCode = ExtractProductCode(jsonData);
-                if (string.IsNullOrEmpty(productCode))
-                {
-                    LogManager.LogError("无法从工序数据中提取产品码，数据被丢弃");
-                    LogManager.LogError($"原始数据: {jsonData?.Substring(0, Math.Min(200, jsonData?.Length ?? 0))}");
-                    return;
-                }
-
-                string processId = ExtractProcessId(jsonData);
-                if (string.IsNullOrEmpty(processId) || !IsValidProcessId(processId))
-                {
-                    LogManager.LogWarning($"工序ID异常: {processId}，数据被丢弃");
-                    return;
-                }
-
-                // 获取或创建产品缓存
-                var buffer = productDataBuffers.GetOrAdd(productCode, key => new ProductDataBuffer
-                {
-                    ProductCode = key,
-                    CreatedTime = DateTime.Now,
-                    LastUpdateTime = DateTime.Now,
-                    IsNG = false
-                });
-
-                // 检查是否重复数据
-                lock (buffer)
-                {
-                    bool isDuplicate = false;
-
-                    switch (processId)
-                    {
-                        case "11":
-                            if (!string.IsNullOrEmpty(buffer.Process11Data))
-                            {
-                                isDuplicate = true;
-                                LogManager.LogWarning($"产品 {productCode} | 工序11数据重复，忽略");
-                            }
-                            else
-                            {
-                                buffer.Process11Data = jsonData;
-                                LogManager.LogInfo($"产品 {productCode} | 工序11数据已接收 | 进度:{buffer.ReceivedCount}/3");
-                                OnCurrentProductChanged?.Invoke(productCode, $"工序1数据已接收 ({buffer.ReceivedCount}/3)");
-                                OnProcessStatusChanged?.Invoke(productCode, $"接收工序数据... ({buffer.ReceivedCount}/3)");
-                            }
-                            break;
-
-                        case "12":
-                            if (!string.IsNullOrEmpty(buffer.Process12Data))
-                            {
-                                isDuplicate = true;
-                                LogManager.LogWarning($"产品 {productCode} | 工序12数据重复，忽略");
-                            }
-                            else
-                            {
-                                buffer.Process12Data = jsonData;
-                                LogManager.LogInfo($"产品 {productCode} | 工序12数据已接收 | 进度:{buffer.ReceivedCount}/3");
-                                OnCurrentProductChanged?.Invoke(productCode, $"工序2数据已接收 ({buffer.ReceivedCount}/3)");
-                                OnProcessStatusChanged?.Invoke(productCode, $"接收工序数据... ({buffer.ReceivedCount}/3)");
-                            }
-                            break;
-
-                        case "13":
-                            if (!string.IsNullOrEmpty(buffer.Process13Data))
-                            {
-                                isDuplicate = true;
-                                LogManager.LogWarning($"产品 {productCode} | 工序13数据重复，忽略");
-                            }
-                            else
-                            {
-                                buffer.Process13Data = jsonData;
-                                LogManager.LogInfo($"产品 {productCode} | 工序13数据已接收 | 进度:{buffer.ReceivedCount}/3");
-                                OnCurrentProductChanged?.Invoke(productCode, $"工序3数据已接收 ({buffer.ReceivedCount}/3)");
-                                OnProcessStatusChanged?.Invoke(productCode, $"接收工序数据... ({buffer.ReceivedCount}/3)");
-                            }
-                            break;
-                    }
-
-                    buffer.LastUpdateTime = DateTime.Now;
-
-                    // 返回OK响应（TODO: 实际需要通过TCP返回）
-                     SendOKResponse(productCode, processId, buffer.ReceivedCount, isDuplicate);
-
-                    // 检测是否包含NG
-                    if (!isDuplicate && !buffer.IsNG)
-                    {
-                        bool hasNG = CheckForNGResult(jsonData);
-                        if (hasNG)
-                        {
-                            LogManager.LogWarning($"产品 {productCode} | 工序{processId}检测到NG");
-                            buffer.IsNG = true;
-                            buffer.NGProcessId = processId;
-
-                            OnCurrentProductChanged?.Invoke(productCode, $"【NG】工序{processId}不合格");
-                            OnProcessStatusChanged?.Invoke(productCode, $"检测到NG产品 (工序{processId}) - 准备处理");
-
-                            // 立即处理NG产品
-                            _ = Task.Run(() => ProcessNGProduct(productCode));
-                        }
-                        else
-                        {
-                            // 检查数据是否收齐
-                            if (buffer.IsComplete)
-                            {
-                                LogManager.LogInfo($"产品 {productCode} | 前3道工序数据已收齐，等待扫码触发");
-                                OnCurrentProductChanged?.Invoke(productCode, "数据已收齐 (3/3) - 等待扫码");
-                                OnProcessStatusChanged?.Invoke(productCode, "前3道工序数据已收齐 - 等待扫码触发");
-                            }
-                        }
-                    }
-                }
-
-                // 清理过期缓存
-                CleanupExpiredBuffers();
-
-                // 检查缓存数量
-                if (productDataBuffers.Count > MAX_PRODUCT_BUFFER_COUNT)
-                {
-                    LogManager.LogWarning($"产品缓存数量超限: {productDataBuffers.Count}/{MAX_PRODUCT_BUFFER_COUNT}");
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"处理工序数据异常: {ex.Message}");
-                LogManager.LogError($"异常堆栈: {ex.StackTrace}");
-            }
-        }
-
-        private async Task SendOKResponse(string productCode, string processId, int receivedCount, bool isDuplicate)
-        {
-            try
-            {
-                var response = new
-                {
-                    Status = "OK",
-                    ProductCode = productCode,
-                    ProcessId = processId,
-                    ReceivedCount = receivedCount,
-                    IsDuplicate = isDuplicate,
-                    Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-                };
-
-                // 需要通过CommunicationManager发送响应
-                await commManager.SendResponseToClient("", response);
-
-                LogManager.LogDebug($"已发送OK响应 | 产品:{productCode} | 工序:{processId} | 重复:{isDuplicate}");
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"发送OK响应失败: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 从JSON提取产品码
-        /// </summary>
-        private string ExtractProductCode(string jsonData)
-        {
-            try
-            {
-                var json = JObject.Parse(jsonData);
-
-                // 尝试提取ProcessId判断工序
-                string processId = json["ProcessId"]?.ToString()
-                                ?? json["processId"]?.ToString();
-
-                string code = null;
-
-                if (processId == "11")
-                {
-                    // 工序11：提取CodeA字段
-                    code = json["CodeA"]?.ToString();
-                }
-                else if (processId == "12" || processId == "13" || processId == "14")
-                {
-                    // 工序12/13/14：提取Code/code字段
-                    code = json["Code"]?.ToString()
-                        ?? json["code"]?.ToString();
-                }
-
-                return code?.Trim();
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"解析产品码失败: {ex.Message}");
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// 从JSON提取工序ID
-        /// </summary>
-        private string ExtractProcessId(string jsonData)
-        {
-            try
-            {
-                var json = JObject.Parse(jsonData);
-
-                string processId = json["ProcessId"]?.ToString()
-                                ?? json["processId"]?.ToString();
-
-                return processId?.Trim();
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"解析工序ID失败: {ex.Message}");
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// 验证工序ID是否有效
-        /// </summary>
-        private bool IsValidProcessId(string processId)
-        {
-            return processId == "11" || processId == "12" || processId == "13";
-        }
-
-        /// <summary>
-        /// 检查JSON数据中是否包含NG结果
-        /// </summary>
-        private bool CheckForNGResult(string jsonData)
-        {
-            try
-            {
-                var json = JObject.Parse(jsonData);
-
-                // 获取Data数组（兼容大小写）
-                var dataArray = json["Data"] as JArray ?? json["data"] as JArray;
-
-                if (dataArray == null) return false;
-
-                foreach (var item in dataArray)
-                {
-                    string result = item["Result"]?.ToString()?.ToUpper()
-                                 ?? item["result"]?.ToString()?.ToUpper();
-
-                    if (result == "NG")
-                    {
-                        string itemName = item["ItemName"]?.ToString() ?? "未知项目";
-                        LogManager.LogWarning($"检测到NG项目: {itemName}");
-                        return true;
-                    }
-                }
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"检查NG结果失败: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// 清理过期的产品缓存
-        /// </summary>
-        private void CleanupExpiredBuffers()
-        {
-            try
-            {
-                var expiredTime = DateTime.Now.AddMinutes(-BUFFER_TIMEOUT_MINUTES);
-
-                var expiredProducts = productDataBuffers
-                    .Where(kvp => kvp.Value.LastUpdateTime < expiredTime)
-                    .Select(kvp => kvp.Key)
-                    .ToList();
-
-                foreach (var productCode in expiredProducts)
-                {
-                    if (productDataBuffers.TryRemove(productCode, out var buffer))
-                    {
-                        LogManager.LogWarning($"产品 {productCode} 缓存超时被清理 | 进度:{buffer.ReceivedCount}/3 | NG:{buffer.IsNG}");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"清理过期缓存异常: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 处理NG产品
-        /// </summary>
-        private async Task ProcessNGProduct(string productCode)
-        {
-            try
-            {
-                if (!productDataBuffers.TryGetValue(productCode, out var buffer))
-                {
-                    LogManager.LogError($"NG产品处理失败：未找到产品 {productCode} 的缓存");
-                    return;
-                }
-
-                // 在lock外部声明需要的变量
-                string[] processDataArray;
-                string completeData;
-                WorkMode originalMode;
-                string ngProcessId;
-                int receivedCount;
-                DateTime createdTime;  // 添加这个
-
-                // 在lock内部获取数据
-                lock (buffer)
-                {
-                    LogManager.LogInfo($"========== 开始处理NG产品 ==========");
-                    LogManager.LogInfo($"产品码: {productCode}");
-                    LogManager.LogInfo($"NG工序: {buffer.NGProcessId}");
-                    LogManager.LogInfo($"已收到工序数: {buffer.ReceivedCount}");
-
-                    // 获取已收到的所有工序数据
-                    processDataArray = buffer.GetReceivedProcessData();
-
-                    // 生成合并数据（JSON数组格式）
-                    completeData = "[" + string.Join(",", processDataArray) + "]";
-
-                    // 保存必要信息
-                    ngProcessId = buffer.NGProcessId;
-                    receivedCount = buffer.ReceivedCount;
-                    createdTime = buffer.CreatedTime;  
-                }
-
-                OnProcessStatusChanged?.Invoke(productCode, $"NG产品处理中 (工序{ngProcessId})...");
-                // 重新构建一个简化的buffer对象用于文件保存
-                var bufferForFile = new ProductDataBuffer
-                {
-                    ProductCode = productCode,
-                    NGProcessId = ngProcessId,
-                    CreatedTime = createdTime,
-                    IsNG = true,
-                    // 根据实际收到的数据填充对应字段，ReceivedCount 会自动计算
-                    Process11Data = processDataArray.Length > 0 ? processDataArray[0] : null,
-                    Process12Data = processDataArray.Length > 1 ? processDataArray[1] : null,
-                    Process13Data = processDataArray.Length > 2 ? processDataArray[2] : null
-                };
-
-                // 在lock外部执行异步操作
-                originalMode = GetCurrentWorkMode();
-                try
-                {
-                    OnProcessStatusChanged?.Invoke(productCode, $"保存NG产品数据 (包含{receivedCount}道工序)...");
-                    // 保存到数据库
-                    bool saveResult = await dataManager.SaveProductData(
-                        productCode,
-                        processDataArray,
-                        null,  // 没有工序14数据
-                        completeData
-                    );
-
-                    if (saveResult)
-                    {
-                        LogManager.LogInfo($"NG产品数据已保存到数据库: {productCode}");
-                        OnProcessStatusChanged?.Invoke(productCode, "NG产品数据已保存到数据库");
-                    }
-                    else
-                    {
-                        LogManager.LogError($"NG产品数据保存失败: {productCode}");
-                    }
-
-                    // 保存到本地文件（NG文件夹）
-                    bool fileResult = await SaveNGProductToFile(productCode, bufferForFile, completeData);
-                    OnProcessStatusChanged?.Invoke(productCode, $"上传NG产品数据到MES...");
-
-                    // 上传到MES
-                    bool uploadResult = await dataManager.UploadToServer(productCode, completeData);
-                    if (uploadResult)
-                    {
-                        LogManager.LogInfo($"NG产品数据已上传到MES: {productCode}");
-                        OnProcessStatusChanged?.Invoke(productCode,$"NG产品已上传MES (包含{receivedCount}道工序数据)");
-                    }
-                    else
-                    {
-                        LogManager.LogWarning($"NG产品数据上传失败，已加入重试队列: {productCode}");
-                        OnProcessStatusChanged?.Invoke(productCode, "NG产品上传失败 - 已加入重试队列");
-                    }
-
-                    LogManager.LogInfo($"NG产品处理完成 | 产品:{productCode} | 数据库:{saveResult} | 文件:{fileResult} | 上传:{uploadResult}");
-                }
-                finally
-                {
-                    // 恢复原始工作模式
-                    UpdateWorkMode(originalMode);
-                }
-
-                // 处理完成后从缓存中移除
-                if (productDataBuffers.TryRemove(productCode, out _))
-                {
-                    LogManager.LogInfo($"NG产品 {productCode} 已从缓存移除");
-                }
-
-                OnProcessStatusChanged?.Invoke(productCode, $"NG产品处理完成 (工序{ngProcessId})");
-                await Task.Delay(2000); // 给用户2秒时间看到完成状态
-                OnCurrentProductChanged?.Invoke("", "等待产品数据...");
-                OnProcessStatusChanged?.Invoke("", "系统运行中 - 等待产品数据");
-                LogManager.LogInfo($"========== NG产品处理结束 ==========");
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"处理NG产品异常: {ex.Message}");
-                LogManager.LogError($"异常堆栈: {ex.StackTrace}");
-
-                OnProcessStatusChanged?.Invoke(productCode, $"NG产品处理异常 - {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 保存NG产品到本地文件
-        /// </summary>
-        private async Task<bool> SaveNGProductToFile(string productCode, ProductDataBuffer buffer, string completeData)
-        {
-            try
-            {
-                // 构建文件路径
-                string baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProductionData");
-                string dateFolder = DateTime.Now.ToString("yyyy-MM-dd");
-                string ngFolder = Path.Combine(baseDir, dateFolder, "NG");
-                // 确保目录存在
-                if (!Directory.Exists(ngFolder))
-                {
-                    Directory.CreateDirectory(ngFolder);
-                    LogManager.LogInfo($"创建NG文件夹: {ngFolder}");
-                }
-                // 生成文件名
-                string fileName = $"{SanitizeFileName(productCode)}_NG_Process{buffer.NGProcessId}.json";
-                string filePath = Path.Combine(ngFolder, fileName);
-
-                // 异步保存文件
-                await Task.Run(() => File.WriteAllText(filePath, completeData, Encoding.UTF8));
-                LogManager.LogInfo($"NG产品文件已保存: {filePath}");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"保存NG产品文件失败: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// 处理工序4（拧紧）NG产品
-        /// </summary>
-        private async Task ProcessProcess4NGProduct(string productCode, TighteningResult tighteningResult)
-        {
-            try
-            {
-                var startTime = DateTime.Now;
-                LogManager.LogInfo($"========== 开始处理工序4 NG产品 ==========");
-                LogManager.LogInfo($"产品码: {productCode}");
-                LogManager.LogInfo($"NG原因: {tighteningResult.QualityResult}");
-                LogManager.LogInfo($"完成扭矩: {tighteningResult.Torque:F2}Nm (目标: {tighteningResult.TargetTorque:F2}Nm)");
-
-                OnProcessStatusChanged?.Invoke(productCode, $"工序4 NG产品处理中 ({tighteningResult.QualityResult})...");
-
-                // 根据工作模式获取前3道工序数据
-                string[] processDataArray;
-                string completeData;
-
-                if (GetCurrentWorkMode() == Models.WorkMode.Independent)
-                {
-                    // 独立模式：仅包含工序4
-                    processDataArray = new string[0];
-                    var tailProcessData = GenerateTailProcessData(productCode, tighteningResult);
-                    completeData = $"[{tailProcessData}]";
-
-                    LogManager.LogInfo("独立模式：仅保存工序4数据");
-                }
-                else
-                {
-                    // 完整流程模式：包含前3道工序
-                    processDataArray = SafeGetProcessData();
-                    var tailProcessData = GenerateTailProcessData(productCode, tighteningResult);
-                    completeData = CombineAllProcessData(tailProcessData, processDataArray);
-
-                    int receivedCount = processDataArray.Count(p => !string.IsNullOrEmpty(p));
-                    LogManager.LogInfo($"完整流程模式：包含{receivedCount}道前序工序数据");
-                }
-
-                // 1. 保存到数据库
-                OnProcessStatusChanged?.Invoke(productCode, "保存NG产品数据 (工序4)...");
-                bool dbResult = await dataManager.SaveProductData(
-                    productCode,
-                    processDataArray,
-                    null,  // 工序4数据已包含在completeData中
-                    completeData
-                );
-
-                if (dbResult)
-                {
-                    LogManager.LogInfo($"NG产品数据已保存到数据库: {productCode}");
-                }
-                else
-                {
-                    LogManager.LogError($"NG产品数据保存数据库失败: {productCode}");
-                }
-
-                // 2. 保存到本地NG文件夹
-                bool fileResult = await SaveProcess4NGProductToFile(productCode, tighteningResult, completeData);
-
-                // 3. 上传到MES
-                OnProcessStatusChanged?.Invoke(productCode, "上传工序4 NG产品数据到MES...");
-                bool uploadResult = await dataManager.UploadToServer(productCode, completeData);
-
-                if (uploadResult)
-                {
-                    LogManager.LogInfo($"NG产品数据已上传到MES: {productCode}");
-                    OnProcessStatusChanged?.Invoke(productCode, "工序4 NG产品已上传MES");
-                }
-                else
-                {
-                    LogManager.LogWarning($"NG产品数据上传失败，已加入重试队列: {productCode}");
-                    OnProcessStatusChanged?.Invoke(productCode, "工序4 NG产品上传失败 - 已加入重试队列");
-                }
-
-                var duration = (DateTime.Now - startTime).TotalSeconds;
-                LogManager.LogInfo($"工序4 NG产品处理完成 | 产品:{productCode} | 数据库:{dbResult} | 文件:{fileResult} | 上传:{uploadResult} | 耗时:{duration:F1}秒");
-                LogManager.LogInfo($"========== 工序4 NG产品处理结束 ==========");
-
-                OnProcessStatusChanged?.Invoke(productCode, $"工序4 NG产品处理完成 ({tighteningResult.QualityResult})");
-                await Task.Delay(2000); // 给用户2秒时间看到完成状态
-
-                OnCurrentProductChanged?.Invoke("", "等待产品数据...");
-                OnProcessStatusChanged?.Invoke("", "系统运行中 - 等待产品数据");
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"处理工序4 NG产品异常: {ex.Message}");
-                LogManager.LogError($"异常堆栈: {ex.StackTrace}");
-                OnProcessStatusChanged?.Invoke(productCode, $"工序4 NG产品处理异常 - {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 保存工序4 NG产品到本地文件
-        /// </summary>
-        private async Task<bool> SaveProcess4NGProductToFile(string productCode, TighteningResult tighteningResult, string completeData)
-        {
-            try
-            {
-                // 构建文件路径
-                string baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProductionData");
-                string dateFolder = DateTime.Now.ToString("yyyy-MM-dd");
-                string ngFolder = Path.Combine(baseDir, dateFolder, "NG");
-
-                // 确保目录存在
-                if (!Directory.Exists(ngFolder))
-                {
-                    Directory.CreateDirectory(ngFolder);
-                    LogManager.LogInfo($"创建NG文件夹: {ngFolder}");
-                }
-
-                // 生成文件名
-                string fileName = $"{SanitizeFileName(productCode)}_NG_Process14.json";
-                string filePath = Path.Combine(ngFolder, fileName);
-
-                // 异步保存文件
-                await Task.Run(() => File.WriteAllText(filePath, completeData, Encoding.UTF8));
-                LogManager.LogInfo($"工序4 NG产品文件已保存: {filePath}");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"保存工序4 NG产品文件失败: {ex.Message}");
-                return false;
-            }
-        }
-
-
-        /// 
-        /// 清理文件名中的非法字符
-        /// 
-        private string SanitizeFileName(string fileName)
-        {
-            if (string.IsNullOrEmpty(fileName))
-                return $"UNKNOWN_{DateTime.Now:HHmmss}";
-            char[] invalidChars = Path.GetInvalidFileNameChars();
-            foreach (char invalidChar in invalidChars)
-            {
-                fileName = fileName.Replace(invalidChar, '_');
-            }
-            if (fileName.Length > 50)
-            {
-                fileName = fileName.Substring(0, 50);
-            }
-            return fileName;
-        }
+        #region 扫码相关方法
 
         private void ProcessBarcodeData(string barcode)
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(barcode))
+                {
+                    LogManager.LogWarning("收到空条码，忽略");
+                    return;
+                }
+
                 LogManager.LogInfo($"扫描到条码: {barcode}");
 
                 bool taskCompleted = false;
 
+                // 无论如何都先缓存条码（双重保险）
                 lock (barcodeLock)
                 {
+                    // 如果缓存已有值，记录警告（可能是重复扫码）
+                    if (!string.IsNullOrEmpty(cachedBarcode) && cachedBarcode != barcode)
+                    {
+                        LogManager.LogWarning($"覆盖旧的缓存条码: {cachedBarcode} → {barcode}");
+                    }
                     cachedBarcode = barcode;
-                    LogManager.LogDebug($"条码已缓存: {barcode}");
+                    LogManager.LogInfo($"条码已缓存: {barcode}");
                 }
 
-                // 尝试完成等待任务
+                // 尝试完成等待任务（如果存在）
                 lock (barcodeTaskLock)
                 {
-                    if (barcodeWaitTask != null && !barcodeWaitTask.Task.IsCompleted)
-                    {
-                        try
-                        {
-                            taskCompleted = barcodeWaitTask.TrySetResult(barcode);
+                    LogManager.LogInfo($"检查等待任务 | " +
+                                     $"barcodeWaitTask={(barcodeWaitTask == null ? "null" : "存在")} | " +
+                                     $"IsCompleted={(barcodeWaitTask?.Task.IsCompleted.ToString() ?? "N/A")} | " +
+                                     $"Status={(barcodeWaitTask?.Task.Status.ToString() ?? "N/A")}");
 
-                            if (taskCompleted)
-                            {
-                                LogManager.LogDebug($"等待任务已完成 | 条码:{barcode}");
-                                barcodeWaitTask = null;
-                            }
-                            else
-                            {
-                                LogManager.LogWarning($"等待任务设置失败 | 任务状态:{barcodeWaitTask.Task.Status}");
-                            }
-                        }
-                        catch (Exception ex)
+                    if (barcodeWaitTask != null)
+                    {
+                        // 检查任务是否已完成（包括取消、错误等状态）
+                        if (barcodeWaitTask.Task.IsCompleted)
                         {
-                            LogManager.LogError($"完成等待任务异常 | 错误:{ex.Message}");
+                            LogManager.LogWarning($"等待任务已完成，状态: {barcodeWaitTask.Task.Status}，条码将从缓存读取");
+                        }
+                        else
+                        {
+                            // 任务未完成，尝试设置结果
+                            try
+                            {
+                                taskCompleted = barcodeWaitTask.TrySetResult(barcode);
+
+                                if (taskCompleted)
+                                {
+                                    LogManager.LogInfo($"✓ 等待任务已完成 | 条码:{barcode}");
+                                    barcodeWaitTask = null; // 清理
+                                }
+                                else
+                                {
+                                    LogManager.LogWarning($"✗ 等待任务设置失败 | 任务状态:{barcodeWaitTask.Task.Status}");
+                                }
+                            }
+                            catch (InvalidOperationException ex)
+                            {
+                                LogManager.LogWarning($"任务已处于完成状态，无法设置结果: {ex.Message}");
+                            }
+                            catch (Exception ex)
+                            {
+                                LogManager.LogError($"完成等待任务异常: {ex.Message}");
+                            }
                         }
                     }
                     else
                     {
-                        if (barcodeWaitTask == null)
-                        {
-                            LogManager.LogDebug("无等待任务，条码已缓存");
-                        }
-                        else
-                        {
-                            LogManager.LogDebug($"等待任务已完成，状态:{barcodeWaitTask.Task.Status}");
-                        }
+                        LogManager.LogInfo("无等待任务，条码已缓存（将在检查缓存时使用）");
                     }
                 }
 
@@ -1811,91 +1160,6 @@ namespace TailInstallationSystem
             }
         }
 
-        // 拧紧轴数据处理方法 
-        private void ProcessTighteningData(TighteningAxisData tighteningData)
-        {
-            try
-            {
-                lock (tighteningDataLock)
-                {
-                    latestTighteningData = tighteningData;
-                }
-
-                if (tighteningData.IsOperationCompleted)
-                {
-                    LogManager.LogInfo($"拧紧操作完成 - 扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
-                }
-                else if (tighteningData.IsRunning)
-                {
-                    LogManager.LogInfo($"拧紧轴运行中 - 实时扭矩: {tighteningData.RealtimeTorque:F2}Nm, 目标: {tighteningData.TargetTorque:F2}Nm");
-                }
-
-                if (tighteningData.HasError)
-                {
-                    LogManager.LogError($"拧紧轴错误 - 错误代码: {tighteningData.ErrorCode}, 状态: {tighteningData.GetStatusDisplayName()}");
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"处理拧紧轴数据异常: {ex.Message}");
-            }
-        }
-
-
-        private string[] SafeGetProcessData()
-        {
-            // 独立模式判断（第一道防线）
-            if (GetCurrentWorkMode() == WorkMode.Independent)
-            {
-                LogManager.LogInfo("独立模式：跳过前3道工序数据获取");
-                return new string[0];  // 返回空数组
-            }
-
-            string currentBarcode = GetCurrentBarcode();
-
-            if (string.IsNullOrEmpty(currentBarcode))
-            {
-                LogManager.LogError("未找到当前产品条码，无法获取工序数据");
-                return new string[3];
-            }
-
-            // 防御性检查，确认是完整流程模式
-            if (GetCurrentWorkMode() != WorkMode.FullProcess)
-            {
-                LogManager.LogWarning($"非完整流程模式调用SafeGetProcessData，当前模式: {GetCurrentWorkMode()}");
-                return new string[0];
-            }
-
-            // 根据条码查找对应产品的数据
-            if (productDataBuffers.TryGetValue(currentBarcode, out var buffer))
-            {
-                lock (buffer)
-                {
-                    if (!buffer.IsComplete)
-                    {
-                        LogManager.LogWarning($"产品 {currentBarcode} 数据不完整 | 进度:{buffer.ReceivedCount}/3");
-                    }
-
-                    var processDataArray = new string[3];
-                    processDataArray[0] = buffer.Process11Data;
-                    processDataArray[1] = buffer.Process12Data;
-                    processDataArray[2] = buffer.Process13Data;
-
-                    // 数据使用后移除缓存
-                    productDataBuffers.TryRemove(currentBarcode, out _);
-                    LogManager.LogInfo($"产品 {currentBarcode} 数据已提取并移除缓存");
-
-                    return processDataArray;
-                }
-            }
-            else
-            {
-                LogManager.LogWarning($"未找到产品 {currentBarcode} 的缓存数据");
-                return new string[3];
-            }
-        }
-
-
         /// <summary>
         /// 持续发送"ON"指令直到扫码成功
         /// </summary>
@@ -1904,7 +1168,7 @@ namespace TailInstallationSystem
             LogManager.LogInfo("开始持续扫码流程...");
 
             int retryCount = 0;
-            const int maxRetries = 12; // 最大重试次数（避免无限循环）
+            const int maxRetries = 12;
             const int scanInterval = 5000; // 每5秒重试一次
 
             while (retryCount < maxRetries && GetRunningState() && !cancellationTokenSource.Token.IsCancellationRequested)
@@ -1913,7 +1177,17 @@ namespace TailInstallationSystem
                 {
                     retryCount++;
 
-                    // 步骤1：发送扫码指令
+                    lock (barcodeLock)
+                    {
+                        if (!string.IsNullOrEmpty(cachedBarcode))
+                        {
+                            LogManager.LogInfo($"发现缓存条码: {cachedBarcode}（在发送指令前）");
+                            string result = cachedBarcode;
+                            cachedBarcode = null;
+                            return result;
+                        }
+                    }
+
                     OnProcessStatusChanged?.Invoke("", $"发送扫码指令 (尝试 {retryCount}/{maxRetries})");
                     LogManager.LogInfo($"扫码指令 | 尝试:{retryCount}/{maxRetries}");
 
@@ -1922,18 +1196,15 @@ namespace TailInstallationSystem
                     {
                         LogManager.LogWarning($"指令发送失败 | 尝试:{retryCount}/{maxRetries} | {scanInterval / 1000}秒后重试");
                         OnProcessStatusChanged?.Invoke("", $"扫码枪通信失败 - {scanInterval / 1000}秒后重试 ({retryCount}/{maxRetries})");
-
-                        // 等待后继续重试
                         await Task.Delay(scanInterval, cancellationTokenSource.Token);
                         continue;
                     }
 
-                    // 步骤2：等待条码扫描（较短超时）
                     OnProcessStatusChanged?.Invoke("", $"等待条码扫描... (尝试 {retryCount}/{maxRetries})");
 
                     try
                     {
-                        string barcode = await WaitForBarcodeScanSingle(scanInterval); // 5秒超时
+                        string barcode = await WaitForBarcodeScanWithFlexibleTimeout(scanInterval, cancellationTokenSource.Token);
 
                         if (!string.IsNullOrWhiteSpace(barcode))
                         {
@@ -1944,83 +1215,6 @@ namespace TailInstallationSystem
                     }
                     catch (TimeoutException)
                     {
-                        LogManager.LogDebug($"扫码超时 | 尝试:{retryCount}/{maxRetries} | 继续重试");
-                        OnProcessStatusChanged?.Invoke("", $"扫码超时，{scanInterval / 1000}秒后重试 (第{retryCount}/{maxRetries}次)");
-                    }
-
-                    // 检查系统是否被取消
-                    if (cancellationTokenSource.Token.IsCancellationRequested)
-                    {
-                        LogManager.LogInfo("扫码流程被取消");
-                        throw new OperationCanceledException("扫码流程被用户取消");
-                    }
-
-                    // 短暂等待后继续下一次尝试
-                    await Task.Delay(1000, cancellationTokenSource.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    LogManager.LogInfo("扫码重试流程被取消");
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    LogManager.LogError($"扫码尝试异常 | 尝试:{retryCount}/{maxRetries} | 错误:{ex.Message}");
-
-                    // 异常情况下也要等待一段时间
-                    await Task.Delay(2000, cancellationTokenSource.Token);
-                }
-            }
-
-            // 达到最大重试次数
-            LogManager.LogError($"扫码重试达到最大次数 ({maxRetries})，放弃扫码");
-            OnProcessStatusChanged?.Invoke("", $"扫码失败，已重试{maxRetries}次");
-            throw new TimeoutException($"扫码重试达到最大次数 ({maxRetries})");
-        }
-
-        /// <summary>
-        /// 单次扫码等待（短超时）
-        /// </summary>
-        private async Task<string> WaitForBarcodeScanSingle(int timeoutMs = 5000)
-        {
-            // 先检查缓存
-            lock (barcodeLock)
-            {
-                if (!string.IsNullOrEmpty(cachedBarcode))
-                {
-                    LogManager.LogDebug($"使用缓存条码: {cachedBarcode}");
-                    string result = cachedBarcode;
-                    cachedBarcode = null;
-                    return result;
-                }
-            }
-
-            // 创建等待任务
-            TaskCompletionSource<string> waitTask;
-            lock (barcodeTaskLock)
-            {
-                barcodeWaitTask = new TaskCompletionSource<string>();
-                waitTask = barcodeWaitTask;
-            }
-
-            try
-            {
-                using (var timeoutCts = new CancellationTokenSource(timeoutMs))
-                using (var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(
-                    timeoutCts.Token, cancellationTokenSource.Token))
-                {
-                    var timeoutTask = Task.Delay(timeoutMs, combinedCts.Token);
-                    var completedTask = await Task.WhenAny(waitTask.Task, timeoutTask);
-
-                    if (completedTask == waitTask.Task && !waitTask.Task.IsCanceled)
-                    {
-                        LogManager.LogDebug($"等待任务完成，条码: {waitTask.Task.Result}");
-                        return waitTask.Task.Result;
-                    }
-                    else
-                    {
-                        await Task.Delay(200); // 给200ms缓冲时间
-
                         lock (barcodeLock)
                         {
                             if (!string.IsNullOrEmpty(cachedBarcode))
@@ -2032,13 +1226,161 @@ namespace TailInstallationSystem
                             }
                         }
 
-                        LogManager.LogDebug($"单次扫码超时 ({timeoutMs}ms)");
-                        throw new TimeoutException($"单次扫码超时 ({timeoutMs}ms)");
+                        LogManager.LogDebug($"扫码超时 | 尝试:{retryCount}/{maxRetries} | 继续重试");
+                        OnProcessStatusChanged?.Invoke("", $"扫码超时，{scanInterval / 1000}秒后重试 (第{retryCount}/{maxRetries}次)");
                     }
+
+                    if (cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        LogManager.LogInfo("扫码流程被取消");
+                        throw new OperationCanceledException("扫码流程被用户取消");
+                    }
+
+                    await Task.Delay(1000, cancellationTokenSource.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    LogManager.LogInfo("扫码重试流程被取消");
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"扫码尝试异常 | 尝试:{retryCount}/{maxRetries} | 错误:{ex.Message}");
+                    await Task.Delay(2000, cancellationTokenSource.Token);
+                }
+            }
+
+            LogManager.LogError($"扫码重试达到最大次数 ({maxRetries})，放弃扫码");
+            OnProcessStatusChanged?.Invoke("", $"扫码失败，已重试{maxRetries}次");
+            throw new TimeoutException($"扫码重试达到最大次数 ({maxRetries})");
+        }
+
+        private async Task<string> WaitForBarcodeScanWithFlexibleTimeout(int timeoutMs, CancellationToken externalToken)
+        {
+            // 立即检查缓存
+            lock (barcodeLock)
+            {
+                if (!string.IsNullOrEmpty(cachedBarcode))
+                {
+                    LogManager.LogInfo($"[检查点1] 使用缓存条码: {cachedBarcode}");
+                    string result = cachedBarcode;
+                    cachedBarcode = null;
+                    return result;
+                }
+            }
+
+            // 创建等待任务
+            TaskCompletionSource<string> waitTask;
+            lock (barcodeTaskLock)
+            {
+                // 清理旧任务（防御性编程）
+                if (barcodeWaitTask != null)
+                {
+                    if (!barcodeWaitTask.Task.IsCompleted)
+                    {
+                        try
+                        {
+                            barcodeWaitTask.TrySetCanceled();
+                            LogManager.LogWarning("清理了未完成的旧等待任务");
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        LogManager.LogDebug($"旧等待任务已完成，状态: {barcodeWaitTask.Task.Status}");
+                    }
+                }
+
+                barcodeWaitTask = new TaskCompletionSource<string>();
+                waitTask = barcodeWaitTask;
+
+                LogManager.LogInfo($"创建新的等待任务 | 超时:{timeoutMs}ms | TaskId:{waitTask.Task.Id}");
+            }
+
+            try
+            {
+                using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(externalToken))
+                {
+                    timeoutCts.CancelAfter(timeoutMs);
+
+                    var timeoutTask = Task.Delay(timeoutMs, timeoutCts.Token);
+                    var completedTask = await Task.WhenAny(waitTask.Task, timeoutTask);
+
+                    // 等待完成后立即检查
+                    if (completedTask == waitTask.Task)
+                    {
+                        if (!waitTask.Task.IsCanceled && waitTask.Task.IsCompleted)
+                        {
+                            try
+                            {
+                                string result = waitTask.Task.Result;
+                                LogManager.LogInfo($"[检查点2] 等待任务完成，条码: {result}");
+                                return result;
+                            }
+                            catch (Exception ex)
+                            {
+                                LogManager.LogError($"获取任务结果异常: {ex.Message}");
+                            }
+                        }
+                        else
+                        {
+                            LogManager.LogWarning($"等待任务状态异常: IsCanceled={waitTask.Task.IsCanceled}, Status={waitTask.Task.Status}");
+                        }
+                    }
+                    else
+                    {
+                        LogManager.LogDebug("等待超时，timeoutTask 先完成");
+                    }
+
+                    // 超时后第1次检查缓存（200ms缓冲）
+                    LogManager.LogDebug("[检查点3] 等待超时，第1次缓冲期检查（200ms）...");
+                    await Task.Delay(200, externalToken);
+
+                    lock (barcodeLock)
+                    {
+                        if (!string.IsNullOrEmpty(cachedBarcode))
+                        {
+                            LogManager.LogInfo($"[检查点3] 缓冲期发现条码: {cachedBarcode}");
+                            string result = cachedBarcode;
+                            cachedBarcode = null;
+                            return result;
+                        }
+                    }
+
+                    // 第2次检查缓存（再等300ms）
+                    LogManager.LogDebug("[检查点4] 第2次缓冲期检查（300ms）...");
+                    await Task.Delay(300, externalToken);
+
+                    lock (barcodeLock)
+                    {
+                        if (!string.IsNullOrEmpty(cachedBarcode))
+                        {
+                            LogManager.LogInfo($"[检查点4] 缓冲期发现条码: {cachedBarcode}");
+                            string result = cachedBarcode;
+                            cachedBarcode = null;
+                            return result;
+                        }
+                    }
+
+                    LogManager.LogDebug($"[检查点4] 所有检查点均未发现条码，确认超时");
+                    throw new TimeoutException($"单次扫码超时 ({timeoutMs}ms)");
                 }
             }
             catch (OperationCanceledException)
             {
+                LogManager.LogInfo("等待任务被取消");
+
+                // 取消时也检查缓存
+                lock (barcodeLock)
+                {
+                    if (!string.IsNullOrEmpty(cachedBarcode))
+                    {
+                        LogManager.LogInfo($"[检查点5] 取消时发现条码: {cachedBarcode}");
+                        string result = cachedBarcode;
+                        cachedBarcode = null;
+                        return result;
+                    }
+                }
                 throw;
             }
             finally
@@ -2048,293 +1390,115 @@ namespace TailInstallationSystem
                     if (barcodeWaitTask == waitTask)
                     {
                         barcodeWaitTask = null;
+                        LogManager.LogDebug($"等待任务已清理 | TaskId:{waitTask.Task.Id}");
                     }
                 }
             }
         }
+
+        #endregion
+
+        #region 拧紧轴相关方法
+
+        private void ProcessTighteningData(TighteningAxisData tighteningData)
+        {
+            try
+            {
+                lock (tighteningDataLock)
+                {
+                    latestTighteningData = tighteningData;
+                }
+
+                if (tighteningData.IsOperationCompleted)
+                {
+                    LogManager.LogDebug($"拧紧操作完成 - 扭矩: {tighteningData.CompletedTorque:F2}Nm, " +
+                                      $"角度: {Math.Abs(tighteningData.CompletedAngle):F1}°, " +
+                                      $"结果: {tighteningData.QualityResult}");
+                }
+                else if (tighteningData.IsRunning)
+                {
+                    // 运行中使用 CompletedTorque（5094在运行中就是实时值）
+                    LogManager.LogDebug($"拧紧轴运行中 - 实时扭矩: {tighteningData.CompletedTorque:F2}Nm, " +
+                                      $"目标: {tighteningData.TargetTorque:F2}Nm");
+                }
+
+                // 用不合格状态替代错误检测
+                if (tighteningData.IsOperationCompleted && !tighteningData.IsQualified)
+                {
+                    LogManager.LogWarning($"拧紧不合格 - 原因: {tighteningData.QualityResult}, " +
+                                        $"状态码: {tighteningData.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"处理拧紧轴数据异常: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region 数据生成方法
 
         /// <summary>
-        /// 等待数据收齐（处理网络延迟）
+        /// 生成工序14数据
         /// </summary>
-        private async Task<bool> WaitForCompleteData(string productCode)
+        private string GenerateTailProcessData(string barcode, TighteningAxisData tighteningResult)
         {
-            var startTime = DateTime.Now;
-            var maxWaitTime = TimeSpan.FromSeconds(SCAN_WAIT_TIMEOUT_SECONDS);
-            int checkCount = 0;
+            LogManager.LogDebug($"生成工序13数据: {barcode}");
 
-            LogManager.LogInfo($"检查产品 {productCode} 数据完整性...");
-
-            OnProcessStatusChanged?.Invoke(productCode, "验证数据完整性...");
-            while (DateTime.Now - startTime < maxWaitTime)
-            {
-                checkCount++;
-
-                if (productDataBuffers.TryGetValue(productCode, out var buffer))
-                {
-                    lock (buffer)
-                    {
-                        if (buffer.IsComplete)
-                        {
-                            LogManager.LogInfo($"产品 {productCode} 数据完整 | 检查次数:{checkCount}");
-                            OnProcessStatusChanged?.Invoke(productCode, "数据验证通过 (3/3)");
-                            return true;
-                        }
-                        else
-                        {
-                            if (checkCount % 2 == 0) // 每2次检查更新一次，避免闪烁
-                            {
-                                OnProcessStatusChanged?.Invoke(productCode,
-                                    $"等待数据收齐... ({buffer.ReceivedCount}/3)");
-                            }
-                            LogManager.LogDebug($"产品 {productCode} 数据未完整 | 进度:{buffer.ReceivedCount}/3 | 等待中...");
-                        }
-                    }
-                }
-                else
-                {
-                    LogManager.LogWarning($"产品 {productCode} 不在缓存中");
-                    OnProcessStatusChanged?.Invoke(productCode, "未找到产品缓存数据");
-                    return false;
-                }
-
-                await Task.Delay(SCAN_WAIT_CHECK_INTERVAL_MS);
-            }
-
-            // 超时后最终检查
-            if (productDataBuffers.TryGetValue(productCode, out var finalBuffer))
-            {
-                lock (finalBuffer)
-                {
-                    if (finalBuffer.IsComplete)
-                    {
-                        LogManager.LogInfo($"产品 {productCode} 数据在超时前收齐");
-                        OnProcessStatusChanged?.Invoke(productCode, "数据验证通过 (3/3)");
-                        return true;
-                    }
-                    else
-                    {
-                        LogManager.LogError($"产品 {productCode} 数据等待超时 | 最终进度:{finalBuffer.ReceivedCount}/3");
-                        // 记录缺失的工序
-                        var missing = new List<string>();
-                        if (string.IsNullOrEmpty(finalBuffer.Process11Data)) missing.Add("工序11");
-                        if (string.IsNullOrEmpty(finalBuffer.Process12Data)) missing.Add("工序12");
-                        if (string.IsNullOrEmpty(finalBuffer.Process13Data)) missing.Add("工序13");
-                        LogManager.LogError($"缺失的工序: {string.Join(", ", missing)}");
-                        OnProcessStatusChanged?.Invoke(productCode,$"数据等待超时 ({finalBuffer.ReceivedCount}/3) - 缺失: {string.Join(", ", missing)}");
-                        return false;
-                    }
-                }
-            }
-            OnProcessStatusChanged?.Invoke(productCode, "数据验证失败 - 超时");
-
-            return false;
-        }
-
-
-        // 等待拧紧操作完成方法 
-        private async Task<TighteningResult> WaitForTighteningCompletion()
-        {
-            LogManager.LogInfo("等待拧紧轴操作完成...");
-
-            var config = commManager.GetCurrentConfig();
-            var maxTimeout = config.TighteningAxis.MaxOperationTimeoutSeconds;
-
-            // 使用通信管理器的等待方法
-            var tighteningData = await commManager.WaitForTighteningCompletion(maxTimeout);
-
-            if (tighteningData != null)
-            {
-                LogManager.LogInfo($"拧紧操作完成 - 扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
-
-                return new TighteningResult
-                {
-                    Torque = tighteningData.CompletedTorque,                  
-                    TargetTorque = tighteningData.TargetTorque,                
-                    LowerLimitTorque = tighteningData.LowerLimitTorque,         
-                    UpperLimitTorque = tighteningData.UpperLimitTorque,      
-                    TighteningTime = tighteningData.Timestamp,
-                    Success = tighteningData.IsQualified,
-                    QualityResult = tighteningData.QualityResult,
-                    ErrorCode = tighteningData.ErrorCode,
-                    StatusCode = tighteningData.RunningStatusCode,
-                    QualifiedCount = tighteningData.QualifiedCount,
-                    TorqueAchievementRate = tighteningData.TorqueAchievementRate
-                };
-            }
-            else
-            {
-                LogManager.LogError("等待拧紧操作完成超时或失败");
-
-                // 尝试获取最后的拧紧数据
-                var lastData = await commManager.ReadTighteningAxisData();
-
-                return new TighteningResult
-                {
-                    Torque = lastData?.CompletedTorque ?? 0f,                  
-                    TargetTorque = lastData?.TargetTorque ?? 0f,              
-                    LowerLimitTorque = lastData?.LowerLimitTorque ?? 0f,      
-                    UpperLimitTorque = lastData?.UpperLimitTorque ?? 0f,      
-                    TighteningTime = DateTime.Now,
-                    Success = false,
-                    QualityResult = "操作超时或通信异常",
-                    ErrorCode = lastData?.ErrorCode ?? -1,
-                    StatusCode = lastData?.RunningStatusCode ?? -1
-                };
-            }
-        }
-
-        private string GenerateTailProcessData(string barcode, TighteningResult tighteningResult)
-        {
-            LogManager.LogInfo($"生成尾椎安装工序数据: {barcode}");
+            // 角度使用绝对值（避免反转导致的负值）
+            var absoluteAngle = Math.Abs(tighteningResult.CompletedAngle);
 
             var processData = new
             {
-                ProcessId = "14",
+                ProcessId = "13",
                 Code = barcode,
                 Data = new[]
                 {
-            new
-            {
-                ItemName = "尾椎安装",
-                Remark = $"扭矩：{tighteningResult.Torque:F2}Nm",
-                Result = tighteningResult.Success ? "PASS" : "NG"
-            }
-        }
+                    new
+                    {
+                        ItemName = "尾椎安装",
+                        Remark = $"扭矩：{tighteningResult.CompletedTorque:F2}Nm",
+                        Result = tighteningResult.IsQualified ? "PASS" : "FAIL"
+                    }
+                }
             };
 
             string jsonResult = JsonConvert.SerializeObject(processData, Formatting.Indented);
 
-            LogManager.LogDebug($"工序4数据生成 | 条码:{barcode} | 扭矩:{tighteningResult.Torque:F2}Nm | 结果:{(tighteningResult.Success ? "PASS" : "NG")}");
+            LogManager.LogDebug($"工序13数据生成 | 条码:{barcode} | " +
+                               $"扭矩:{tighteningResult.CompletedTorque:F2}Nm | " +
+                               $"角度:{absoluteAngle:F1}° | " +
+                               $"结果:{(tighteningResult.IsQualified ? "PASS" : "FAIL")}");
 
             return jsonResult;
         }
 
+        #endregion
 
-        private string CombineAllProcessData(string tailProcessData, string[] processDataArray)
-        {
-            var currentMode = GetCurrentWorkMode();
-
-            // 独立模式判断
-            if (currentMode == WorkMode.Independent)
-            {
-                LogManager.LogInfo("独立模式：仅上传工序4数据");
-
-                var independentData = new List<object>();
-
-                // 添加工序4数据
-                if (!string.IsNullOrEmpty(tailProcessData))
-                {
-                    try
-                    {
-                        independentData.Add(JsonConvert.DeserializeObject(tailProcessData));
-                    }
-                    catch (Exception ex)
-                    {
-                        LogManager.LogError($"工序4数据解析失败 | 错误:{ex.Message}");
-                        independentData.Add(new { error = "工序4数据解析失败", originalData = tailProcessData });
-                    }
-                }
-                else
-                {
-                    independentData.Add(new { error = "工序4数据为空" });
-                }
-
-                string independentJson = JsonConvert.SerializeObject(independentData, Formatting.Indented);
-                LogManager.LogInfo($"独立模式数据合并完成 | 工序4:{tailProcessData?.Length ?? 0}B | 总计:{independentJson.Length}B");
-
-                return independentJson;
-            }
-
-            // 完整流程模式
-            LogManager.LogInfo($"完整流程模式：合并4道工序数据");
-
-            var allProcesses = new List<object>();
-            int[] sizes = new int[4]; // 记录每道工序的数据大小
-
-            // 添加前三道工序数据
-            for (int i = 0; i < processDataArray.Length; i++)
-            {
-                if (!string.IsNullOrEmpty(processDataArray[i]))
-                {
-                    try
-                    {
-                        allProcesses.Add(JsonConvert.DeserializeObject(processDataArray[i]));
-                        sizes[i] = processDataArray[i].Length;
-                    }
-                    catch (Exception ex)
-                    {
-                        LogManager.LogError($"工序{i + 1}数据解析失败 | 错误:{ex.Message}");
-                        allProcesses.Add(new { error = "数据解析失败", originalData = processDataArray[i] });
-                        sizes[i] = 0; // 标记为异常
-                    }
-                }
-                else
-                {
-                    // 数据为空的情况
-                    allProcesses.Add(new { error = "数据为空" });
-                    sizes[i] = 0;
-                    LogManager.LogWarning($"工序{i + 1}数据为空");
-                }
-            }
-
-            // 添加尾椎安装数据（工序4）
-            if (!string.IsNullOrEmpty(tailProcessData))
-            {
-                try
-                {
-                    allProcesses.Add(JsonConvert.DeserializeObject(tailProcessData));
-                    sizes[3] = tailProcessData.Length;
-                }
-                catch (Exception ex)
-                {
-                    LogManager.LogError($"工序4数据解析失败 | 错误:{ex.Message}");
-                    allProcesses.Add(new { error = "尾椎数据解析失败", originalData = tailProcessData });
-                    sizes[3] = 0;
-                }
-            }
-            else
-            {
-                allProcesses.Add(new { error = "尾椎数据为空" });
-                sizes[3] = 0;
-                LogManager.LogWarning("工序4数据为空");
-            }
-
-            string combinedData = JsonConvert.SerializeObject(allProcesses, Formatting.Indented);
-
-            LogManager.LogInfo($"完整流程数据合并完成 | " +
-                              $"工序1:{sizes[0]}B | " +
-                              $"工序2:{sizes[1]}B | " +
-                              $"工序3:{sizes[2]}B | " +
-                              $"工序4:{sizes[3]}B | " +
-                              $"总计:{combinedData.Length}B");
-
-            return combinedData;
-        }
-
+        #region 公共方法
 
         public void EmergencyStop()
         {
             try
             {
                 LogManager.LogWarning("执行紧急停止");
-                
+
                 lock (runningStateLock)
                 {
                     isRunning = false;
                 }
 
-                // 1. 立即取消所有异步操作
                 cancellationTokenSource?.Cancel();
 
-                // 2. 先解绑事件，避免继续接收数据
+                // 解绑事件
                 if (commManager != null)
                 {
-                    commManager.OnDataReceived -= ProcessReceivedData;
                     commManager.OnBarcodeScanned -= ProcessBarcodeData;
                     commManager.OnTighteningDataReceived -= ProcessTighteningData;
                 }
 
-                // 3. 清理等待任务
+                // 清理等待任务
                 lock (barcodeTaskLock)
                 {
                     if (barcodeWaitTask != null && !barcodeWaitTask.Task.IsCompleted)
@@ -2343,15 +1507,11 @@ namespace TailInstallationSystem
                         {
                             barcodeWaitTask.SetCanceled();
                         }
-                        catch (InvalidOperationException)
-                        {
-                            // 任务可能已经完成，忽略异常
-                        }
+                        catch (InvalidOperationException) { }
                         barcodeWaitTask = null;
                     }
                 }
 
-                // 4. 清空缓存
                 lock (barcodeLock)
                 {
                     cachedBarcode = null;
@@ -2362,12 +1522,9 @@ namespace TailInstallationSystem
                     latestTighteningData = null;
                 }
 
-                // 5. 等待短暂时间让事件处理完成
                 System.Threading.Thread.Sleep(100);
-
-                // 6. 最后释放通讯管理器
                 commManager?.Dispose();
-                
+
                 LogManager.LogWarning("系统已紧急停止");
             }
             catch (Exception ex)
@@ -2385,7 +1542,6 @@ namespace TailInstallationSystem
                 // 解绑旧事件
                 if (commManager != null)
                 {
-                    commManager.OnDataReceived -= ProcessReceivedData;
                     commManager.OnBarcodeScanned -= ProcessBarcodeData;
                     commManager.OnTighteningDataReceived -= ProcessTighteningData;
                 }
@@ -2396,7 +1552,6 @@ namespace TailInstallationSystem
                 // 绑定新事件
                 if (commManager != null)
                 {
-                    commManager.OnDataReceived += ProcessReceivedData;
                     commManager.OnBarcodeScanned += ProcessBarcodeData;
                     commManager.OnTighteningDataReceived += ProcessTighteningData;
                 }
@@ -2409,22 +1564,8 @@ namespace TailInstallationSystem
             }
         }
 
-
-        // 拧紧结果类 
-        public class TighteningResult
-        {
-            public float Torque { get; set; }
-            public float TargetTorque { get; set; }
-            public float LowerLimitTorque { get; set; }
-            public float UpperLimitTorque { get; set; }
-            public DateTime TighteningTime { get; set; }
-            public bool Success { get; set; }
-            public string QualityResult { get; set; }
-            public int ErrorCode { get; set; }
-            public int StatusCode { get; set; }
-            public int QualifiedCount { get; set; }
-            public double TorqueAchievementRate { get; set; }
-        }
-
+        #endregion
     }
 }
+
+

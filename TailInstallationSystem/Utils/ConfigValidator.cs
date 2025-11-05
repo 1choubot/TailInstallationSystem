@@ -28,9 +28,6 @@ namespace TailInstallationSystem.Utils
             // 验证拧紧轴配置
             ValidateTighteningAxisConfig(config.TighteningAxis, result);
 
-            // 验证PC配置
-            ValidatePCConfig(config.PC, result);
-
             // 验证服务器配置
             ValidateServerConfig(config.Server, result);
 
@@ -70,24 +67,51 @@ namespace TailInstallationSystem.Utils
                 result.AddError($"PLC站号无效: {plc.Station}，必须在1-247范围内");
             }
 
-            // 验证地址格式
-            if (string.IsNullOrWhiteSpace(plc.StartSignalAddress))
+            if (string.IsNullOrWhiteSpace(plc.ScanTriggerAddress))
             {
-                result.AddError("PLC启动信号地址不能为空");
+                result.AddError("PLC扫码触发地址不能为空");
             }
-            else if (!IsValidModbusAddress(plc.StartSignalAddress))
+            else if (!IsValidModbusAddress(plc.ScanTriggerAddress))
             {
-                result.AddError($"PLC启动信号地址格式无效: {plc.StartSignalAddress}");
+                result.AddError($"PLC扫码触发地址格式无效: {plc.ScanTriggerAddress}");
             }
 
-            if (string.IsNullOrWhiteSpace(plc.ConfirmSignalAddress))
+            if (string.IsNullOrWhiteSpace(plc.TighteningTriggerAddress))
             {
-                result.AddError("PLC确认信号地址不能为空");
+                result.AddError("PLC拧紧触发地址不能为空");
             }
-            else if (!IsValidModbusAddress(plc.ConfirmSignalAddress))
+            else if (!IsValidModbusAddress(plc.TighteningTriggerAddress))
             {
-                result.AddError($"PLC确认信号地址格式无效: {plc.ConfirmSignalAddress}");
+                result.AddError($"PLC拧紧触发地址格式无效: {plc.TighteningTriggerAddress}");
             }
+
+            if (string.IsNullOrWhiteSpace(plc.ScanResultAddress))
+            {
+                result.AddError("PLC扫码结果反馈地址不能为空");
+            }
+            else if (!IsValidModbusAddress(plc.ScanResultAddress))
+            {
+                result.AddError($"PLC扫码结果反馈地址格式无效: {plc.ScanResultAddress}");
+            }
+
+            if (string.IsNullOrWhiteSpace(plc.TighteningResultAddress))
+            {
+                result.AddError("PLC拧紧结果反馈地址不能为空");
+            }
+            else if (!IsValidModbusAddress(plc.TighteningResultAddress))
+            {
+                result.AddError($"PLC拧紧结果反馈地址格式无效: {plc.TighteningResultAddress}");
+            }
+
+            if (string.IsNullOrWhiteSpace(plc.HeartbeatAddress))
+            {
+                result.AddError("PLC心跳地址不能为空");
+            }
+            else if (!IsValidModbusAddress(plc.HeartbeatAddress))
+            {
+                result.AddError($"PLC心跳地址格式无效: {plc.HeartbeatAddress}");
+            }
+
         }
 
         private static void ValidateScannerConfig(ScannerConfig scanner, ValidationResult result)
@@ -142,9 +166,19 @@ namespace TailInstallationSystem.Utils
             }
 
             // 验证最大操作超时时间
-            if (tighteningAxis.MaxOperationTimeoutSeconds < 5 || tighteningAxis.MaxOperationTimeoutSeconds > 300)
+            if (tighteningAxis.MaxOperationTimeoutSeconds < 1 || tighteningAxis.MaxOperationTimeoutSeconds > 300)
             {
-                result.AddError($"拧紧轴最大操作超时时间无效: {tighteningAxis.MaxOperationTimeoutSeconds}秒，建议在5-300秒范围内");
+                result.AddError($"拧紧轴最大操作超时时间无效: {tighteningAxis.MaxOperationTimeoutSeconds}秒，建议在1-300秒范围内");
+            }
+            else if (tighteningAxis.MaxOperationTimeoutSeconds < 3)
+            {
+                result.AddWarning($"拧紧轴最大操作超时时间较短: {tighteningAxis.MaxOperationTimeoutSeconds}秒，" +
+                                 "D501触发时数据应已就绪，建议设置为3秒处理通讯抖动");
+            }
+            else if (tighteningAxis.MaxOperationTimeoutSeconds > 10)
+            {
+                result.AddWarning($"拧紧轴最大操作超时时间较长: {tighteningAxis.MaxOperationTimeoutSeconds}秒，" +
+                                 "在新协议下(D501=拧紧已完成)，建议缩短为3-5秒");
             }
 
             // 验证扭矩范围
@@ -172,36 +206,36 @@ namespace TailInstallationSystem.Utils
                 return;
             }
 
-            // 验证关键寄存器地址范围（基于说明书中的地址范围5000-5102）
             var addressesToCheck = new Dictionary<string, int>
             {
-                ["控制命令字"] = registers.ControlCommand,
-                ["运行状态"] = registers.RunningStatus,
-                ["错误代码"] = registers.ErrorCode,
+                ["状态码"] = registers.StatusCode,              
                 ["完成扭矩"] = registers.CompletedTorque,
-                ["实时扭矩"] = registers.RealtimeTorque,
+                ["完成角度"] = registers.CompletedAngle,       
                 ["目标扭矩"] = registers.TargetTorque,
                 ["下限扭矩"] = registers.LowerLimitTorque,
                 ["上限扭矩"] = registers.UpperLimitTorque,
-                ["合格数记录"] = registers.QualifiedCount,
+                ["目标角度"] = registers.TargetAngle,          
+                ["下限角度"] = registers.LowerLimitAngle,      
+                ["上限角度"] = registers.UpperLimitAngle,      
+                ["程序号"] = registers.ProgramNumber,          
+                ["合格数量"] = registers.QualifiedCount,
                 ["紧固模式"] = registers.TighteningMode,
-                ["实时角度"] = registers.RealtimeAngle
+                ["反馈速度"] = registers.FeedbackSpeed         
             };
 
             foreach (var address in addressesToCheck)
             {
-                if (address.Value < 5000 || address.Value > 5102)
+                if (address.Value < 5000 || address.Value > 5110)  
                 {
-                    result.AddWarning($"拧紧轴{address.Key}地址({address.Value})超出标准范围(5000-5102)，请确认是否正确");
+                    result.AddWarning($"拧紧轴{address.Key}地址({address.Value})超出标准范围(5000-5110)，请确认是否正确");
                 }
             }
 
-            // 检查关键地址是否为偶数（32位浮点数必须从偶数地址开始）
             var criticalAddresses = new Dictionary<string, int>
             {
-                ["控制命令字"] = registers.ControlCommand,
-                ["运行状态"] = registers.RunningStatus,
-                ["完成扭矩"] = registers.CompletedTorque
+                ["状态码"] = registers.StatusCode,        
+                ["完成扭矩"] = registers.CompletedTorque,
+                ["完成角度"] = registers.CompletedAngle     
             };
 
             foreach (var address in criticalAddresses)
@@ -213,21 +247,6 @@ namespace TailInstallationSystem.Utils
             }
         }
 
-        private static void ValidatePCConfig(PCConfig pc, ValidationResult result)
-        {
-            if (pc == null)
-            {
-                result.AddError("PC配置为空");
-                return;
-            }
-
-            ValidateIPAndPort(pc.IP, pc.Port, "PC", result);
-
-            if (pc.TimeoutSeconds < 1 || pc.TimeoutSeconds > 300)
-            {
-                result.AddError($"PC超时时间无效: {pc.TimeoutSeconds}秒，建议在1-300秒范围内");
-            }
-        }
 
         private static void ValidateServerConfig(ServerConfig server, ValidationResult result)
         {

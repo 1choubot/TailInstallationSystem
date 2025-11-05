@@ -1,4 +1,5 @@
-﻿using System;
+﻿using OfficeOpenXml;
+using System;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -12,6 +13,19 @@ namespace TailInstallationSystem
         [STAThread]
         static void Main()
         {
+            try
+            {
+                ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+                LogManager.LogInfo("EPPlus 7.3.2 授权设置成功");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"EPPlus授权设置失败：{ex.Message}",
+                    "初始化警告",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
             // 设置全局异常处理模式
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 

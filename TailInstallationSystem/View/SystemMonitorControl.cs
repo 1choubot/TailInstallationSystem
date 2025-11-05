@@ -9,10 +9,12 @@ namespace TailInstallationSystem.View
 {
     public partial class SystemMonitorControl : UserControl
     {
+        public event EventHandler RebuildManagerRequested;
         private CommunicationManager commManager;
         private TailInstallationController controller;
         private System.Windows.Forms.Timer statusCheckTimer;
         private CancellationTokenSource cancellationTokenSource;
+        private DateTime _lastRealtimeTorqueUpdate = DateTime.MinValue;
 
         // 状态锁，保证线程安全
         private readonly object disposeLock = new object();
@@ -44,9 +46,8 @@ namespace TailInstallationSystem.View
             if (commManager != null)
             {
                 commManager.OnDeviceConnectionChanged += OnDeviceConnectionChanged;
-                commManager.OnDataReceived += OnDataReceived;
                 commManager.OnBarcodeScanned += OnBarcodeScanned;
-                commManager.OnTighteningDataReceived += OnTighteningDataReceived; 
+                commManager.OnTighteningDataReceived += OnTighteningDataReceived;
             }
 
             if (controller != null)
@@ -57,172 +58,46 @@ namespace TailInstallationSystem.View
 
             InitializeStatusTimer();
             InitializeDefaultState();
-            LoadWorkModeSettings();
+            InitializeTighteningDisplay();
         }
+
+        /// <summary>
+        /// 初始化拧紧数据显示
+        /// </summary>
+        private void InitializeTighteningDisplay()
+        {
+            try
+            {
+                lblTargetTorque.Text = "目标扭矩：-- Nm  |  目标角度：--°";
+                lblRealtimeTorque.Text = "角度范围：-- ~ --°";
+                lblRealtimeTorque.ForeColor = System.Drawing.Color.FromArgb(140, 140, 140);
+                lblCompletedTorque.Text = "完成扭矩：-- Nm  |  角度：--°";
+                lblCompletedTorque.ForeColor = System.Drawing.Color.FromArgb(64, 64, 64);
+                lblTorqueRange.Text = "扭矩范围：-- ~ -- Nm";
+                lblRunningStatus.Text = "运行状态：未连接";
+                lblRunningStatus.ForeColor = System.Drawing.Color.FromArgb(140, 140, 140);
+                lblLastProduct.Text = "最近拧紧：--";
+
+                LogManager.LogInfo("拧紧数据显示已初始化");
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"初始化拧紧数据显示失败: {ex.Message}");
+            }
+        }
+
+
 
         private void InitializeDefaultState()
         {
             UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
             UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
-            UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected); 
-            UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
+            UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected);
 
             currentBarcodeLabel.Text = "当前产品条码: 等待扫描...";
             currentStatusLabel.Text = "状态: 系统未启动";
-        }
 
-        /// <summary>
-        /// 加载工作模式设置
-        /// </summary>
-        private void LoadWorkModeSettings()
-        {
-            try
-            {
-                var config = ConfigManager.GetCurrentConfig();
-                var currentMode = config.System.CurrentWorkMode;
-
-                // 设置开关状态（不触发事件）
-                workModeSwitch.CheckedChanged -= workModeSwitch_CheckedChanged;
-                workModeSwitch.Checked = (currentMode == Models.WorkMode.Independent);
-                workModeSwitch.CheckedChanged += workModeSwitch_CheckedChanged;
-
-                // 更新标签显示
-                UpdateWorkModeLabel(currentMode);
-
-                // 更新控制器模式
-                if (controller != null)
-                {
-                    controller.UpdateWorkMode(currentMode);
-                }
-
-                LogManager.LogInfo($"工作模式已加载: {GetWorkModeDisplayName(currentMode)}");
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"加载工作模式配置失败: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// 工作模式开关变更事件
-        /// </summary>
-        private void workModeSwitch_CheckedChanged(object sender, AntdUI.BoolEventArgs e)
-        {
-            try
-            {
-                var newMode = e.Value ? Models.WorkMode.Independent : Models.WorkMode.FullProcess;
-
-                // 显示确认对话框
-                var message = e.Value
-                    ? "您正在切换到【独立模式】：\n\n" +
-                      "• 将忽略前端发送的工序1-3数据\n" +
-                      "• 仅执行扫码→拧紧→上传工序4\n" +
-                      "• 数据库中工序1-3列为空\n\n" +
-                      "是否确认切换？"
-                    : "您正在切换到【完整流程模式】：\n\n" +
-                      "• 接收并缓存前端发送的工序1-3数据\n" +
-                      "• 执行完整的4道工序流程\n" +
-                      "• 数据合并后上传\n\n" +
-                      "是否确认切换？";
-
-                var result = MessageBox.Show(
-                    message,
-                    "工作模式切换确认",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-
-                if (result == DialogResult.Yes)
-                {
-                    // 清空产品数据缓存，防止旧模式数据污染
-                    if (controller != null)
-                    {
-                        try
-                        {
-                            // 调用控制器的清空缓存方法
-                            controller.ClearProductDataBuffers();
-                            LogManager.LogInfo("工作模式切换：已清空产品数据缓存");
-                        }
-                        catch (Exception clearEx)
-                        {
-                            LogManager.LogWarning($"清空产品缓存时异常: {clearEx.Message}");
-                        }
-                    }
-
-                    // 保存配置
-                    var config = ConfigManager.GetCurrentConfig();
-                    config.System.CurrentWorkMode = newMode;
-                    ConfigManager.SaveConfig(config);
-
-                    // 更新控制器
-                    if (controller != null)
-                    {
-                        controller.UpdateWorkMode(newMode);
-                    }
-
-                    // 更新UI显示
-                    UpdateWorkModeLabel(newMode);
-
-                    LogManager.LogInfo($"工作模式已切换: {GetWorkModeDisplayName(newMode)}");
-
-                    // 显示成功提示
-                    AntdUI.Message.success(this.FindForm(), "工作模式切换成功！", autoClose: 2);
-                }
-                else
-                {
-                    // 用户取消，恢复开关状态（不触发事件）
-                    workModeSwitch.CheckedChanged -= workModeSwitch_CheckedChanged;
-                    workModeSwitch.Checked = !e.Value;
-                    workModeSwitch.CheckedChanged += workModeSwitch_CheckedChanged;
-
-                    LogManager.LogInfo("用户取消工作模式切换");
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"切换工作模式失败: {ex.Message}");
-                AntdUI.Message.error(this.FindForm(), $"切换失败: {ex.Message}", autoClose: 3);
-            }
-        }
-
-
-        /// <summary>
-        /// 更新工作模式标签显示
-        /// </summary>
-        private void UpdateWorkModeLabel(Models.WorkMode mode)
-        {
-            if (InvokeRequired)
-            {
-                Invoke(new Action<Models.WorkMode>(UpdateWorkModeLabel), mode);
-                return;
-            }
-
-            switch (mode)
-            {
-                case Models.WorkMode.FullProcess:
-                    workModeLabel.Text = "工作模式：完整流程";
-                    workModeLabel.ForeColor = System.Drawing.Color.FromArgb(82, 196, 26); // 绿色
-                    break;
-                case Models.WorkMode.Independent:
-                    workModeLabel.Text = "工作模式：独立模式";
-                    workModeLabel.ForeColor = System.Drawing.Color.FromArgb(250, 173, 20); // 橙色
-                    break;
-            }
-        }
-
-        /// <summary>
-        /// 获取工作模式显示名称
-        /// </summary>
-        private string GetWorkModeDisplayName(Models.WorkMode mode)
-        {
-            switch (mode)
-            {
-                case Models.WorkMode.FullProcess:
-                    return "完整流程模式";
-                case Models.WorkMode.Independent:
-                    return "独立模式（仅工序4）";
-                default:
-                    return "未知模式";
-            }
+            InitializeTighteningDisplay();
         }
 
 
@@ -246,6 +121,8 @@ namespace TailInstallationSystem.View
             }
         }
 
+      
+
         private async void btnStart_Click(object sender, EventArgs e)
         {
             try
@@ -254,6 +131,24 @@ namespace TailInstallationSystem.View
                 UpdateProgress(5);
                 await Task.Delay(100);
 
+                if (commManager == null)
+                {
+                    LogManager.LogError("启动失败：通讯管理器为null");
+                    MessageBox.Show("通讯管理器未初始化，请重新启动程序", "错误",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    UpdateProgress(0);
+                    return;
+                }
+
+                if (controller == null)
+                {
+                    LogManager.LogError("启动失败：控制器为null");
+                    MessageBox.Show("控制器未初始化，请重新启动程序", "错误",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    UpdateProgress(0);
+                    return;
+                }
+
                 UpdateProgress(10);
 
                 // 先初始化设备连接
@@ -261,7 +156,9 @@ namespace TailInstallationSystem.View
                 {
                     LogManager.LogInfo("开始初始化设备连接...");
                     currentStatusLabel.Text = "状态: 初始化设备连接中...";
+
                     bool connectResult = await commManager.InitializeConnections();
+
                     if (!connectResult)
                     {
                         MessageBox.Show("设备连接初始化失败，请检查设备状态", "错误",
@@ -275,8 +172,6 @@ namespace TailInstallationSystem.View
 
                     UpdateDeviceStatus("PLC",
                         commManager.IsPLCConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected);
-                    UpdateDeviceStatus("PC",
-                        commManager.IsPCConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected);
                     UpdateDeviceStatus("Scanner",
                         commManager.IsScannerConnected ? DeviceStatus.Connected : DeviceStatus.Disconnected);
                     UpdateDeviceStatus("TighteningAxis",
@@ -313,17 +208,9 @@ namespace TailInstallationSystem.View
 
                 StartStatusMonitoring();
 
-                var currentMode = controller.GetCurrentWorkMode();
-                if (currentMode == Models.WorkMode.Independent)
-                {
-                    currentBarcodeLabel.Text = "当前产品: 等待扫码（独立模式）...";
-                    currentStatusLabel.Text = "状态: 系统运行中（独立模式）- 等待扫码";
-                }
-                else
-                {
-                    currentBarcodeLabel.Text = "当前产品: 等待产品数据...";
-                    currentStatusLabel.Text = "状态: 系统运行中 - 等待产品数据";
-                }
+                currentBarcodeLabel.Text = "当前产品: 等待扫码...";
+                currentStatusLabel.Text = "状态: 系统运行中 - 等待扫码";
+
                 LogManager.LogInfo("系统启动成功");
             }
             catch (Exception ex)
@@ -337,12 +224,12 @@ namespace TailInstallationSystem.View
                 {
                     LogManager.LogWarning($"停止心跳信号失败: {stopEx.Message}");
                 }
+
                 MessageBox.Show($"启动失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 UpdateProgress(0);
                 LogManager.LogError($"系统启动失败: {ex.Message}");
             }
         }
-
 
 
         private async void btnStop_Click(object sender, EventArgs e)
@@ -351,11 +238,11 @@ namespace TailInstallationSystem.View
             {
                 currentStatusLabel.Text = "状态: 正在停止系统（请稍候）...";
                 UpdateProgress(50);
-                await Task.Delay(100); // 确保UI更新
+                await Task.Delay(100);
+
                 currentStatusLabel.Text = "状态: 停止主工作循环...";
                 StopStatusMonitoring();
 
-                // 添加null检查
                 if (controller != null)
                 {
                     await controller.StopSystem();
@@ -382,16 +269,25 @@ namespace TailInstallationSystem.View
                 btnStop.Enabled = false;
                 UpdateProgress(0);
 
-                // 重置设备状态...
+                // 重置设备状态
                 UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected);
-                UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
-
                 currentBarcodeLabel.Text = "当前产品: 系统已停止";
                 currentStatusLabel.Text = "状态: 系统已停止";
+                InitializeTighteningDisplay();
                 await Task.Delay(200);
                 currentStatusLabel.Text = "状态: 系统已停止（可重新启动）";
+                try
+                {
+                    LogManager.LogInfo("准备触发通讯管理器重建请求...");
+                    RebuildManagerRequested?.Invoke(this, EventArgs.Empty);
+                    LogManager.LogInfo("通讯管理器重建请求已发送");
+                }
+                catch (Exception rebuildEx)
+                {
+                    LogManager.LogError($"触发重建请求异常: {rebuildEx.Message}");
+                }
                 LogManager.LogInfo("系统已停止");
             }
             catch (Exception ex)
@@ -417,7 +313,6 @@ namespace TailInstallationSystem.View
             if (result == DialogResult.Yes)
             {
                 currentStatusLabel.Text = "状态: 紧急停止中...";
-                // 立即停止定时器！
                 StopStatusMonitoring();
 
                 controller?.EmergencyStop();
@@ -436,14 +331,16 @@ namespace TailInstallationSystem.View
                 btnStop.Enabled = false;
                 UpdateProgress(0);
 
-                // 重置所有设备状态...
+                // 重置所有设备状态
                 UpdateDeviceStatus("PLC", DeviceStatus.Disconnected);
                 UpdateDeviceStatus("Scanner", DeviceStatus.Disconnected);
-                UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected); 
-                UpdateDeviceStatus("PC", DeviceStatus.Disconnected);
+                UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected);
 
                 currentBarcodeLabel.Text = "当前产品: 紧急停止";
                 currentStatusLabel.Text = "状态: 紧急停止";
+
+                InitializeTighteningDisplay();
+
                 LogManager.LogWarning("系统紧急停止");
             }
         }
@@ -519,15 +416,10 @@ namespace TailInstallationSystem.View
                         scannerStatusLabel.Text = statusText;
                         scannerStatusLabel.ForeColor = statusColor;
                         break;
-                    case "TIGHTENINGAXIS": 
+                    case "TIGHTENINGAXIS":
                         tighteningAxisIndicator.BackColor = statusColor;
                         tighteningAxisStatusLabel.Text = statusText;
                         tighteningAxisStatusLabel.ForeColor = statusColor;
-                        break;
-                    case "PC":
-                        pcIndicator.BackColor = statusColor;
-                        pcStatusLabel.Text = statusText;
-                        pcStatusLabel.ForeColor = statusColor;
                         break;
                     default:
                         LogManager.LogWarning($"Unknown device name: {deviceName}");
@@ -548,24 +440,6 @@ namespace TailInstallationSystem.View
             UpdateDeviceStatus(deviceName, status);
         }
 
-        private void OnDataReceived(string data)
-        {
-            if (CheckDisposed()) return;
-            try
-            {
-                SafeInvoke(() => UpdateDeviceStatus("PC", DeviceStatus.Working));
-                LogManager.LogInfo("PC接收到工序数据");
-                // 安全的异步状态重置
-                _ = SafeDelayedAction(2000, () =>
-                {
-                    SafeInvoke(() => UpdateDeviceStatus("PC", DeviceStatus.Waiting));
-                });
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"PC数据接收事件处理异常: {ex.Message}");
-            }
-        }
 
         private void OnBarcodeScanned(string barcode)
         {
@@ -588,30 +462,59 @@ namespace TailInstallationSystem.View
         private void OnTighteningDataReceived(TighteningAxisData tighteningData)
         {
             if (CheckDisposed()) return;
+
             try
             {
                 SafeInvoke(() =>
                 {
-                    if (tighteningData.IsRunning)
+                    // 1. 更新目标参数（配置参数）
+                    if (tighteningData.TargetTorque > 0)
                     {
-                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Working);
-                        //LogManager.LogInfo($"拧紧轴运行中 - 实时扭矩: {tighteningData.RealtimeTorque:F2}Nm");
+                        // 在一行显示扭矩和角度
+                        lblTargetTorque.Text = $"目标扭矩：{tighteningData.TargetTorque:F1} Nm  |  目标角度：{tighteningData.TargetAngle:F1}°";
+
+                        // 扭矩范围
+                        lblTorqueRange.Text = $"扭矩范围：{tighteningData.LowerLimitTorque:F1} ~ {tighteningData.UpperLimitTorque:F1} Nm";
                     }
-                    else if (tighteningData.IsOperationCompleted)
+
+                    // 2. 更新角度范围（复用 lblRealtimeTorque 控件）
+                    if (tighteningData.LowerLimitAngle > 0 || tighteningData.UpperLimitAngle > 0)
                     {
-                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Connected);
-                        //LogManager.LogInfo($"拧紧操作完成 - 完成扭矩: {tighteningData.CompletedTorque:F2}Nm, 结果: {tighteningData.QualityResult}");
+                        lblRealtimeTorque.Text = $"角度范围：{tighteningData.LowerLimitAngle:F1} ~ {tighteningData.UpperLimitAngle:F1}°";
+                        lblRealtimeTorque.ForeColor = System.Drawing.Color.FromArgb(140, 140, 140);
                     }
                     else
                     {
-                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Connected);
+                        lblRealtimeTorque.Text = "角度范围：未设置";
+                        lblRealtimeTorque.ForeColor = System.Drawing.Color.FromArgb(200, 200, 200);
                     }
 
-                    // 如果有错误，显示错误状态
-                    if (tighteningData.HasError)
+                    // 3. 运行中：更新运行状态
+                    if (tighteningData.IsRunning)
                     {
-                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Disconnected);
-                        LogManager.LogError($"拧紧轴错误: 错误代码{tighteningData.ErrorCode}");
+                        lblRunningStatus.Text = "运行状态：拧紧中";
+                        lblRunningStatus.ForeColor = System.Drawing.Color.FromArgb(24, 144, 255);
+
+                        // 更新设备状态卡片
+                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Working);
+                    }
+
+                    // 4. 完成时：更新完成数据
+                    if (tighteningData.IsOperationCompleted)
+                    {
+                        // 完成扭矩 + 角度显示（一行显示，带结果标识）
+                        string resultIcon = tighteningData.IsQualified ? "✓合格" : "✗" + tighteningData.QualityResult;
+                        lblCompletedTorque.Text = $"完成扭矩：{tighteningData.CompletedTorque:F2} Nm  |  角度：{tighteningData.CompletedAngle:F1}°  {resultIcon}";
+                        lblCompletedTorque.ForeColor = tighteningData.IsQualified
+                            ? System.Drawing.Color.FromArgb(82, 196, 26)   // 绿色
+                            : System.Drawing.Color.FromArgb(245, 34, 45);  // 红色
+
+                        // 运行状态恢复空闲
+                        lblRunningStatus.Text = "运行状态：空闲";
+                        lblRunningStatus.ForeColor = System.Drawing.Color.FromArgb(82, 196, 26);
+
+                        // 更新设备状态卡片
+                        UpdateDeviceStatus("TighteningAxis", DeviceStatus.Connected);
                     }
                 });
             }
@@ -620,6 +523,9 @@ namespace TailInstallationSystem.View
                 LogManager.LogError($"拧紧轴数据接收事件处理异常: {ex.Message}");
             }
         }
+
+
+
 
         private void SafeInvoke(Action action)
         {
@@ -719,6 +625,14 @@ namespace TailInstallationSystem.View
             if (!string.IsNullOrEmpty(barcode))
             {
                 currentBarcodeLabel.Text = $"当前产品条码: {barcode}";
+
+                if (barcode != "等待扫描..." &&
+                    barcode != "系统已停止" &&
+                    barcode != "紧急停止" &&
+                    barcode != "")
+                {
+                    lblLastProduct.Text = $"最近拧紧：{barcode}";
+                }
             }
             currentStatusLabel.Text = $"状态: {status}";
         }
@@ -836,18 +750,21 @@ namespace TailInstallationSystem.View
 
                     // 取消订阅事件
                     LogManager.OnLogWritten -= OnLogMessage;
+
                     if (commManager != null)
                     {
                         commManager.OnDeviceConnectionChanged -= OnDeviceConnectionChanged;
-                        commManager.OnDataReceived -= OnDataReceived;
                         commManager.OnBarcodeScanned -= OnBarcodeScanned;
-                        commManager.OnTighteningDataReceived -= OnTighteningDataReceived; 
+                        commManager.OnTighteningDataReceived -= OnTighteningDataReceived;
                     }
+
                     if (controller != null)
                     {
                         controller.OnProcessStatusChanged -= OnProcessStatusChanged;
                         controller.OnCurrentProductChanged -= OnCurrentProductChanged;
                     }
+
+                    RebuildManagerRequested = null;
 
                     statusCheckTimer?.Stop();
                     statusCheckTimer?.Dispose();
@@ -859,5 +776,6 @@ namespace TailInstallationSystem.View
 
             base.Dispose(disposing);
         }
+
     }
 }

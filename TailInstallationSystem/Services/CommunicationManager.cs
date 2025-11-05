@@ -27,12 +27,12 @@ namespace TailInstallationSystem
         private CommunicationConfig _config;
         private bool _disposed = false;
         private readonly object _disposeLock = new object();
-        private readonly ConcurrentDictionary<string, TcpClient> _pcClients = new ConcurrentDictionary<string, TcpClient>();
-        private readonly ConcurrentDictionary<string, NetworkStream> _pcStreams = new ConcurrentDictionary<string, NetworkStream>();
         private int heartbeatLogCounter = 0;
         private bool _lastOperationCompleted = false;
         private static bool _lastCompletionLogged = false;
         private volatile TaskCompletionSource<bool> _heartbeatTaskCompletion = null;
+        private TighteningAxisData _lastCompletedData = null;
+        private readonly object _completedDataLock = new object();
 
         // 自动重连相关
         private System.Threading.Timer _reconnectTimer;
@@ -43,7 +43,6 @@ namespace TailInstallationSystem
         private volatile bool _lastPLCStatus = false;
         private volatile bool _lastScannerStatus = false;
         private volatile bool _lastTighteningStatus = false;
-        private volatile bool _lastPCStatus = false;
         private readonly object _statusLock = new object();
 
         // 心跳状态管理
@@ -68,12 +67,6 @@ namespace TailInstallationSystem
         private ModbusTcpNet busTcpClient = null;
         private bool connectSuccess_PLC = false;
 
-        // 前端PC数据接收 (TCP)
-        private Socket socket_PC = null;
-        private bool connectSuccess_PC = false;
-        private TcpListener pcListener;
-        private bool pcServerRunning = false;
-        private volatile int pcRetryCount = 0;
         private volatile bool _isDisposing = false;
         private readonly SemaphoreSlim _disposeSemaphore = new SemaphoreSlim(1, 1);
 
@@ -97,7 +90,6 @@ namespace TailInstallationSystem
 
         #region 事件
 
-        public event Action<string> OnDataReceived;
         public event Action<string> OnBarcodeScanned;
         public event Action<TighteningAxisData> OnTighteningDataReceived; 
         public event Action<bool> OnPLCTrigger;
@@ -120,33 +112,25 @@ namespace TailInstallationSystem
 
             // 生成配置摘要
             var configSummary = $"PLC:{_config.PLC.IP}:{_config.PLC.Port}|" +
-                               $"PC:{_config.PC.IP}:{_config.PC.Port}|" +
                                $"Scanner:{_config.Scanner.IP}:{_config.Scanner.Port}|" +
                                $"TighteningAxis:{_config.TighteningAxis.IP}:{_config.TighteningAxis.Port}";
-
-            // 判断是否需要输出详细信息
             if (!_firstInstanceCreated)
             {
-                // 首次创建，输出完整信息
                 LogManager.LogInfo($"通讯管理器初始化:");
                 LogManager.LogInfo($"  - PLC: {_config.PLC.IP}:{_config.PLC.Port}");
-                LogManager.LogInfo($"  - PC: {_config.PC.IP}:{_config.PC.Port} (服务端模式: {_config.PC.IsServer})");
                 LogManager.LogInfo($"  - 扫码枪: {_config.Scanner.IP}:{_config.Scanner.Port}");
                 LogManager.LogInfo($"  - 拧紧轴: {_config.TighteningAxis.IP}:{_config.TighteningAxis.Port}");
-
                 _firstInstanceCreated = true;
                 _lastConfigSummary = configSummary;
             }
             else if (configSummary != _lastConfigSummary)
             {
-                // 配置有变化，输出变化的内容
                 LogManager.LogInfo($"通讯管理器配置已更新:");
                 CompareAndLogChanges(_lastConfigSummary, configSummary);
                 _lastConfigSummary = configSummary;
             }
             else
             {
-                // 配置未变化，只输出简单信息
                 LogManager.LogInfo("通讯管理器重新创建（配置未变化）");
             }
         }
@@ -233,10 +217,6 @@ namespace TailInstallationSystem
                 bool plcResult = await InitializePLC();
                 SafeTriggerDeviceConnectionChanged("PLC", plcResult);
 
-                // 初始化PC TCP连接
-                bool pcResult = await InitializePCConnection();
-                OnDeviceConnectionChanged?.Invoke("PC", pcResult);
-
                 // 初始化扫码枪连接
                 bool scannerResult = await InitializeScannerConnection();
                 OnDeviceConnectionChanged?.Invoke("Scanner", scannerResult);
@@ -245,7 +225,7 @@ namespace TailInstallationSystem
                 bool tighteningAxisResult = await InitializeTighteningAxisConnection(startPolling);
                 OnDeviceConnectionChanged?.Invoke("TighteningAxis", tighteningAxisResult);
 
-                LogManager.LogInfo($"设备连接初始化完成 - PLC:{plcResult}, PC:{pcResult}, 扫码枪:{scannerResult}, 拧紧轴:{tighteningAxisResult}");
+                LogManager.LogInfo($"设备连接初始化完成 - PLC:{plcResult}, 扫码枪:{scannerResult}, 拧紧轴:{tighteningAxisResult}");
 
                 StartAutoReconnect();
                 return plcResult; 
@@ -281,10 +261,14 @@ namespace TailInstallationSystem
                     LogManager.LogInfo($"拧紧轴连接成功: {_config.TighteningAxis.IP}:{_config.TighteningAxis.Port}");
 
                     // 验证连接
-                    var testRead = await Task.Run(() => tighteningAxisClient.ReadInt16("5100", 1));
+                    var testRead = await Task.Run(() =>tighteningAxisClient.ReadInt16("5100", 2)); 
+
                     if (testRead.IsSuccess)
                     {
-                        LogManager.LogInfo($"拧紧轴连接验证成功，状态值: {testRead.Content[0]}");
+                        float statusFloat = ConvertToFloat(testRead.Content);
+                        int statusValue = (int)statusFloat;
+
+                        LogManager.LogInfo($"拧紧轴连接验证成功，状态值: {statusValue}");
                     }
                     else
                     {
@@ -507,60 +491,78 @@ namespace TailInstallationSystem
                     bool statusChanged = false;
                     bool isNewCompletion = false;
 
-                    if (data.ControlCommand != _lastCommandState)
+                    // 1. 检测状态码变化
+                    if (data.StatusCode != _lastRunningStatus)
                     {
-                        if (_lastCommandState != -999)
+                        if (_lastRunningStatus != -999)
                         {
-                            if (data.ControlCommand == 100 || data.ControlCommand == 0)
-                            {
-                                string action = data.ControlCommand == 100 ? "启动" : "完成";
-                                LogManager.LogDebug($"拧紧命令 | {_lastCommandState}→{data.ControlCommand} | 动作:{action}");
-                            }
-                            else
-                            {
-                                LogManager.LogDebug($"拧紧命令 | {_lastCommandState}→{data.ControlCommand}");
-                            }
+                            string oldStatus = GetStatusName(_lastRunningStatus);
+                            string newStatus = data.GetStatusDisplayName();
+
+                            LogManager.LogInfo($"拧紧状态 | {oldStatus}→{newStatus} | " +
+                                             $"扭矩:{data.CompletedTorque:F2}Nm | " +
+                                             $"角度:{data.CompletedAngle:F1}°");
                             statusChanged = true;
                         }
 
-                        _lastCommandState = data.ControlCommand;
+                        _lastRunningStatus = data.StatusCode;
                     }
 
-                    if (data.RunningStatusCode != _lastRunningStatus)
-                    {
-                        string oldStatus = GetStatusName(_lastRunningStatus);
-                        string newStatus = data.GetStatusDisplayName();
-
-                        LogManager.LogInfo($"拧紧状态 | {oldStatus}→{newStatus} | 实时扭矩:{data.RealtimeTorque:F2}Nm");
-
-                        _lastRunningStatus = data.RunningStatusCode;
-                        statusChanged = true;
-                    }
-
-                    // 完成状态检测（只检测从false到true的变化）
+                    // 精确判断真正的拧紧完成
                     bool currentCompleted = data.IsOperationCompleted;
-                    if (currentCompleted && !_lastOperationCompleted)
+
+                    // 判断条件：
+                    // 1. 当前是完成状态(11)
+                    // 2. 上一次不是完成状态（避免 11→11 重复缓存）
+                    // 3. 上一次是空闲状态(0)（基于你的观察：0→11 是拧紧完成）
+                    // 4. 必须有有效扭矩数据
+                    bool isRealCompletion = currentCompleted &&
+                                           !_lastOperationCompleted &&
+                                           _lastRunningStatus == 0 &&  // 关键：只接受从0来的
+                                           data.CompletedTorque > 0.01f;
+
+                    if (isRealCompletion)
                     {
                         isNewCompletion = true;
 
-                        // 只记录一次完成日志
+                        // 缓存拧紧完成数据
+                        lock (_completedDataLock)
+                        {
+                            _lastCompletedData = data;
+                            LogManager.LogInfo($"✓ [轮询缓存] 完成数据已保存 | " +
+                                             $"状态:{data.StatusCode}, " +
+                                             $"扭矩:{data.CompletedTorque:F2}Nm, " +
+                                             $"角度:{data.CompletedAngle:F1}° (原始值)");
+                        }
+
+                        // 记录完成日志（只记录一次）
                         if (!_lastCompletionLogged)
                         {
+                            var absAngle = Math.Abs(data.CompletedAngle);
                             LogManager.LogInfo($"拧紧完成 | " +
                                              $"扭矩:{data.CompletedTorque:F2}/{data.TargetTorque:F2}Nm | " +
-                                             $"范围:[{data.LowerLimitTorque:F2},{data.UpperLimitTorque:F2}] | " +
+                                             $"角度:{absAngle:F1}° | " +
                                              $"结果:{(data.IsQualified ? "✓合格" : "✗" + data.QualityResult)}");
                             _lastCompletionLogged = true;
                         }
                     }
                     else if (!currentCompleted)
                     {
+                        // 状态离开完成状态时，重置标志
                         _lastCompletionLogged = false;
+                    }
+                    else if (currentCompleted && _lastOperationCompleted)
+                    {
+                        // 调试日志：记录被跳过的缓存（回零后的11状态）
+                        if (_lastRunningStatus == 500 || _lastRunningStatus == 1000 || _lastRunningStatus == 11)
+                        {
+                            LogManager.LogDebug($"[缓存跳过] 状态:{_lastRunningStatus}→11 (回零状态切换，不缓存)");
+                        }
                     }
 
                     _lastOperationCompleted = currentCompleted;
 
-                    // 只在状态变化或新完成时触发事件
+                    // 3. 只在状态变化或新完成时触发事件
                     if (statusChanged || isNewCompletion)
                     {
                         OnTighteningDataReceived?.Invoke(data);
@@ -568,7 +570,6 @@ namespace TailInstallationSystem
                 }
                 else
                 {
-                    // 数据为null，判定为连接断开
                     LogManager.LogWarning("拧紧轴数据读取失败，可能已断开连接");
                     connectSuccess_TighteningAxis = false;
                     OnDeviceConnectionChanged?.Invoke("TighteningAxis", false);
@@ -579,19 +580,21 @@ namespace TailInstallationSystem
                 if (isStatusPolling && !_isDisposing)
                 {
                     LogManager.LogError($"轮询拧紧轴状态异常: {ex.Message}");
-                    // 异常时更新连接状态
                     connectSuccess_TighteningAxis = false;
                     OnDeviceConnectionChanged?.Invoke("TighteningAxis", false);
                 }
             }
         }
 
-        // 读取拧紧轴数据
+
+        /// <summary>
+        /// 读取拧紧轴数据
+        /// </summary>
         public async Task<TighteningAxisData> ReadTighteningAxisData()
         {
             if (!connectSuccess_TighteningAxis || tighteningAxisClient == null)
             {
-                LogManager.LogError($"拧紧轴未连接 - connectSuccess:{connectSuccess_TighteningAxis}, client:{tighteningAxisClient != null}");
+                LogManager.LogError($"拧紧轴未连接");
                 return null;
             }
 
@@ -600,71 +603,49 @@ namespace TailInstallationSystem
                 var registers = _config.TighteningAxis.Registers;
                 var data = new TighteningAxisData();
 
-                // 1. 读取控制命令字（地址5102，单个寄存器）
-                var controlCommandResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadUInt16(registers.ControlCommand.ToString(), 1));
+                // 1. 读取状态码（地址5104，最关键）
+                var statusResult = await Task.Run(() =>
+                    tighteningAxisClient.ReadInt16(registers.StatusCode.ToString(), 2));
 
-                if (controlCommandResult.IsSuccess)
+                if (statusResult.IsSuccess)
                 {
-                    data.ControlCommand = controlCommandResult.Content[0];
-                    LogManager.LogDebug($"控制命令字(5102): {data.ControlCommand}");
+                    float statusFloat = ConvertToFloat(statusResult.Content);
+                    data.StatusCode = (int)statusFloat;
+
+                    LogManager.LogDebug($"状态码(5104): {data.StatusCode}");
                 }
                 else
                 {
-                    LogManager.LogError($"读取控制命令字失败: {controlCommandResult.Message}");
+                    LogManager.LogError($"读取状态码失败: {statusResult.Message}");
                     connectSuccess_TighteningAxis = false;
                     OnDeviceConnectionChanged?.Invoke("TighteningAxis", false);
                     return null;
                 }
 
-                // 2. 读取运行状态（地址5100，单个寄存器）
-                var statusResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadUInt16(registers.RunningStatus.ToString(), 1));
-
-                if (statusResult.IsSuccess)
-                {
-                    data.RunningStatusCode = statusResult.Content[0];
-                    data.Status = (TighteningStatus)data.RunningStatusCode;
-                }
-
-                // 3. 读取错误代码（地址5096，单个寄存器）
-                var errorResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadUInt16(registers.ErrorCode.ToString(), 1));
-
-                if (errorResult.IsSuccess)
-                {
-                    data.ErrorCode = errorResult.Content[0];
-                    if (data.ErrorCode != 0)
-                    {
-                        LogManager.LogDebug($"错误代码(5096): 0x{data.ErrorCode:X4}");
-                    }
-                }
-
-                // 4. 读取完成扭矩（地址5092，2个寄存器）
+                // 2. 读取完成扭矩（地址5094）
                 var completedTorqueResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.CompletedTorque.ToString(), 2));
 
                 if (completedTorqueResult.IsSuccess)
                 {
-                    // 使用正确的字节序转换（寄存器[1]在高位）
                     data.CompletedTorque = ConvertToFloat(completedTorqueResult.Content);
 
                     if (data.CompletedTorque > 0.01f)
                     {
-                        LogManager.LogDebug($"完成扭矩(5092): {data.CompletedTorque:F2}Nm");
+                        LogManager.LogDebug($"完成扭矩(5094): {data.CompletedTorque:F2}Nm");
                     }
                 }
 
-                // 5. 读取实时扭矩（地址5094）
-                var realtimeTorqueResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadInt16(registers.RealtimeTorque.ToString(), 2));
+                // 3. 读取完成角度（地址5102）
+                var completedAngleResult = await Task.Run(() =>
+                    tighteningAxisClient.ReadInt16(registers.CompletedAngle.ToString(), 2));
 
-                if (realtimeTorqueResult.IsSuccess)
+                if (completedAngleResult.IsSuccess)
                 {
-                    data.RealtimeTorque = ConvertToFloat(realtimeTorqueResult.Content);
+                    data.CompletedAngle = ConvertToFloat(completedAngleResult.Content);
                 }
 
-                // 6. 读取目标扭矩（地址5006）
+                // 4. 读取目标扭矩（地址5006）
                 var targetTorqueResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.TargetTorque.ToString(), 2));
 
@@ -673,34 +654,52 @@ namespace TailInstallationSystem
                     data.TargetTorque = ConvertToFloat(targetTorqueResult.Content);
                 }
 
-                // 7. 读取扭矩下限（地址5002）
-                var lowerLimitResult = await Task.Run(() =>
+                // 5. 读取目标角度（地址5032）
+                var targetAngleResult = await Task.Run(() =>
+                    tighteningAxisClient.ReadInt16(registers.TargetAngle.ToString(), 2));
+
+                if (targetAngleResult.IsSuccess)
+                {
+                    data.TargetAngle = ConvertToFloat(targetAngleResult.Content);
+                }
+
+                // 6. 读取扭矩下限（地址5002）
+                var lowerLimitTorqueResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.LowerLimitTorque.ToString(), 2));
 
-                if (lowerLimitResult.IsSuccess)
+                if (lowerLimitTorqueResult.IsSuccess)
                 {
-                    data.LowerLimitTorque = ConvertToFloat(lowerLimitResult.Content);
+                    data.LowerLimitTorque = ConvertToFloat(lowerLimitTorqueResult.Content);
                 }
 
-                // 8. 读取扭矩上限（地址5004）
-                var upperLimitResult = await Task.Run(() =>
+                // 7. 读取扭矩上限（地址5004）
+                var upperLimitTorqueResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.UpperLimitTorque.ToString(), 2));
 
-                if (upperLimitResult.IsSuccess)
+                if (upperLimitTorqueResult.IsSuccess)
                 {
-                    data.UpperLimitTorque = ConvertToFloat(upperLimitResult.Content);
+                    data.UpperLimitTorque = ConvertToFloat(upperLimitTorqueResult.Content);
                 }
 
-                // 9. 读取实时角度（地址5098）
-                var realtimeAngleResult = await Task.Run(() =>
-                    tighteningAxisClient.ReadInt16(registers.RealtimeAngle.ToString(), 2));
+                // 8. 读取角度下限（地址5042）
+                var lowerLimitAngleResult = await Task.Run(() =>
+                    tighteningAxisClient.ReadInt16(registers.LowerLimitAngle.ToString(), 2));
 
-                if (realtimeAngleResult.IsSuccess)
+                if (lowerLimitAngleResult.IsSuccess)
                 {
-                    data.RealtimeAngle = ConvertToFloat(realtimeAngleResult.Content);
+                    data.LowerLimitAngle = ConvertToFloat(lowerLimitAngleResult.Content);
                 }
 
-                // 10. 读取合格数记录（地址5088，2个寄存器 - 浮点数）
+                // 9. 读取角度上限（地址5044）
+                var upperLimitAngleResult = await Task.Run(() =>
+                    tighteningAxisClient.ReadInt16(registers.UpperLimitAngle.ToString(), 2));
+
+                if (upperLimitAngleResult.IsSuccess)
+                {
+                    data.UpperLimitAngle = ConvertToFloat(upperLimitAngleResult.Content);
+                }
+
+                // 10. 读取合格数量（地址5090）
                 var qualifiedCountResult = await Task.Run(() =>
                     tighteningAxisClient.ReadInt16(registers.QualifiedCount.ToString(), 2));
 
@@ -708,6 +707,15 @@ namespace TailInstallationSystem
                 {
                     float qualifiedFloat = ConvertToFloat(qualifiedCountResult.Content);
                     data.QualifiedCount = (int)qualifiedFloat;
+                }
+
+                // 11. 读取反馈速度（地址5100，可选）
+                var speedResult = await Task.Run(() =>
+                    tighteningAxisClient.ReadInt16(registers.FeedbackSpeed.ToString(), 2));
+
+                if (speedResult.IsSuccess)
+                {
+                    data.FeedbackSpeed = ConvertToFloat(speedResult.Content);
                 }
 
                 // 设置时间戳
@@ -722,6 +730,7 @@ namespace TailInstallationSystem
                 return null;
             }
         }
+
 
         private float ConvertToFloat(short[] registers)
         {
@@ -742,50 +751,167 @@ namespace TailInstallationSystem
         }
 
 
-        // 等待拧紧操作完成
-        public async Task<TighteningAxisData> WaitForTighteningCompletion(int timeoutSeconds = 30)
+        /// <summary>
+        /// 验证扭矩值是否在合理范围内
+        /// </summary>
+        private bool IsValidTorqueValue(float torque)
         {
-            var startTime = DateTime.Now;
-            var timeout = TimeSpan.FromSeconds(timeoutSeconds);
+            return !float.IsNaN(torque) &&
+                   !float.IsInfinity(torque) &&
+                   torque >= 0f &&
+                   torque <= 100f;  // 根据实际设备调整上限
+        }
 
-            LogManager.LogInfo("等待拧紧操作完成...");
-
-            int lastControlCommand = -1;
-
-            while (DateTime.Now - startTime < timeout)
+        /// <summary>
+        /// 获取轮询缓存的完成数据（优先使用）
+        /// </summary>
+        public TighteningAxisData GetCachedCompletedData()
+        {
+            lock (_completedDataLock)
             {
-                var data = await ReadTighteningAxisData();
-                if (data != null)
+                if (_lastCompletedData != null)
                 {
-                    // 记录状态变化
-                    if (data.ControlCommand != lastControlCommand)
-                    {
-                        LogManager.LogInfo($"控制命令字变化: {lastControlCommand} → {data.ControlCommand}");
-                        lastControlCommand = data.ControlCommand;
-                    }
+                    var dataAge = (DateTime.Now - _lastCompletedData.Timestamp).TotalSeconds;
 
-                    // 检测从100变为0（完成）
-                    if (lastControlCommand == 100 && data.ControlCommand == 0)
+                    if (dataAge <= 10)  // 10秒内的数据认为有效
                     {
-                        LogManager.LogInfo($"拧紧操作完成，控制命令字已归0");
-                        LogManager.LogInfo($"运行状态: {data.RunningStatusCode}, 完成扭矩: {data.CompletedTorque}");
-                        return data;
-                    }
+                        var cachedData = _lastCompletedData;
 
-                    // 或者检测有明确的结果状态
-                    if (data.ControlCommand == 0 && data.RunningStatusCode >= 10)
+                        // 使用后立即清空，防止被后续读取
+                        _lastCompletedData = null;
+
+                        // 重置完成标志，允许下次拧紧再缓存
+                        _lastOperationCompleted = false;
+
+                        LogManager.LogInfo($"✓ [使用缓存] 数据年龄:{dataAge:F1}秒 | " +
+                                         $"状态:{cachedData.StatusCode}, " +
+                                         $"扭矩:{cachedData.CompletedTorque:F2}Nm | " +
+                                         $"缓存已清空，准备下次拧紧");
+                        return cachedData;
+                    }
+                    else
                     {
-                        LogManager.LogInfo($"拧紧操作完成，状态码: {data.RunningStatusCode}");
-                        return data;
+                        LogManager.LogWarning($"✗ [缓存过期] 数据年龄:{dataAge:F1}秒，已超时");
+                        _lastCompletedData = null; // 过期数据清空
                     }
                 }
+                else
+                {
+                    LogManager.LogDebug("[无缓存] _lastCompletedData 为 null");
+                }
 
-                await Task.Delay(100);
+                return null;
+            }
+        }
+
+
+        /// <summary>
+        /// 读取已完成的拧紧数据（D501=1时调用）
+        /// </summary>
+        public async Task<TighteningAxisData> ReadCompletedTighteningData(int maxRetries = 3, int retryDelayMs = 200)
+        {
+            LogManager.LogInfo("D501触发：拧紧已完成，开始读取结果数据");
+
+            TighteningAxisData data = null;
+            int attemptCount = 0;
+
+            while (attemptCount < maxRetries)
+            {
+                attemptCount++;
+
+                try
+                {
+                    // 直接读取拧紧轴寄存器数据
+                    data = await ReadTighteningAxisData();
+
+                    if (data != null)
+                    {
+                        // 验证数据有效性
+                        if (ValidateTighteningData(data))
+                        {
+                            LogManager.LogInfo($"拧紧数据读取成功（第{attemptCount}次尝试）| " +
+                                              $"扭矩:{data.CompletedTorque:F2}Nm | " +
+                                              $"角度:{data.CompletedAngle:F1}° | " +
+                                              $"状态:{data.GetStatusDisplayName()} | " +
+                                              $"结果:{(data.IsQualified ? "合格" : data.QualityResult)}");
+                            return data;
+                        }
+                        else
+                        {
+                            LogManager.LogWarning($"拧紧数据验证失败（第{attemptCount}次）| " +
+                                                $"状态码:{data.StatusCode}");
+                        }
+                    }
+                    else
+                    {
+                        LogManager.LogWarning($"拧紧数据读取失败（第{attemptCount}次）- 返回null");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogManager.LogError($"拧紧数据读取异常（第{attemptCount}次）: {ex.Message}");
+                }
+
+                // 如果不是最后一次尝试，等待后重试
+                if (attemptCount < maxRetries)
+                {
+                    LogManager.LogDebug($"等待{retryDelayMs}ms后重试...");
+                    await Task.Delay(retryDelayMs);
+                }
             }
 
-            LogManager.LogWarning($"等待拧紧操作完成超时({timeoutSeconds}秒)");
+            // 所有尝试都失败
+            LogManager.LogError($"拧紧数据读取失败，已尝试{maxRetries}次");
             return null;
         }
+
+        /// <summary>
+        /// 验证拧紧数据有效性（简化版 - 只检查关键条件）
+        /// </summary>
+        private bool ValidateTighteningData(TighteningAxisData data)
+        {
+            if (data == null)
+            {
+                LogManager.LogWarning("数据验证失败：数据为null");
+                return false;
+            }
+
+            // 1. 必须已完成（状态码=11或21~30）
+            if (!data.IsOperationCompleted)
+            {
+                LogManager.LogDebug($"数据验证失败：未完成状态（状态码={data.StatusCode}）");
+                return false;
+            }
+
+            // 2. 必须有完成扭矩
+            if (data.CompletedTorque <= 0)
+            {
+                LogManager.LogDebug("数据验证失败：完成扭矩为0");
+                return false;
+            }
+
+            // 3. 角度验证（容忍负值，只记录警告）
+            var absoluteAngle = Math.Abs(data.CompletedAngle);
+            if (absoluteAngle > 3000)
+            {
+                LogManager.LogWarning($"角度数据异常(绝对值:{absoluteAngle:F1}°)，但不阻止流程");
+            }
+
+            // 4. 扭矩必须在合理范围内
+            if (data.CompletedTorque > 100)
+            {
+                LogManager.LogWarning($"扭矩数据超出合理范围({data.CompletedTorque:F2}Nm)");
+            }
+
+            LogManager.LogInfo($"拧紧数据验证通过 | " +
+                              $"扭矩:{data.CompletedTorque:F2}Nm | " +
+                              $"角度:{absoluteAngle:F1}° (原始:{data.CompletedAngle:F1}°) | " +
+                              $"状态:{data.GetStatusDisplayName()} | " +
+                              $"结果:{data.QualityResult}");
+
+            return true;
+        }
+
 
         #endregion
         #region PLC通讯 
@@ -811,7 +937,7 @@ namespace TailInstallationSystem
                 if (connect.IsSuccess)
                 {
                     // 验证连接
-                    string testAddress = _config.PLC.TriggerAddress.Replace("D", "");
+                    string testAddress = _config.PLC.TighteningTriggerAddress.Replace("D", "");
                     var testResult = await Task.Run(() => busTcpClient.ReadInt16(testAddress, 1));
 
                     if (testResult.IsSuccess)
@@ -854,185 +980,10 @@ namespace TailInstallationSystem
             }
         }
 
-        public async Task<bool> CheckPLCTrigger()
-        {
-            if (!connectSuccess_PLC)
-            {
-                return false;
-            }
-            try
-            {
-                using (var testClient = new ModbusTcpNet(_config.PLC.IP, _config.PLC.Port, _config.PLC.Station))
-                {
-                    testClient.ConnectTimeOut = 5000;
-                    testClient.ReceiveTimeOut = 3000;
-                    testClient.AddressStartWithZero = true;
-                    testClient.IsStringReverse = false;
-
-                    var connect = await testClient.ConnectServerAsync();
-                    if (connect.IsSuccess)
-                    {
-                        string originalAddress = _config.PLC.StartSignalAddress.Replace("M", "").Replace("m", "");
-
-                        var result = await Task.Run(() => testClient.ReadInt16(originalAddress, 1));
-                        testClient.ConnectClose();
-                        if (result.IsSuccess && result.Content != null && result.Content.Length > 0)
-                        {
-                            short registerValue = result.Content[0];
-                            bool triggered = registerValue > 0;
-                            // 只在状态变化时输出详细日志
-                            if (_lastPLCTriggerState == null || _lastPLCTriggerState.Value != triggered)
-                            {
-                                LogManager.LogInfo($"  PLC触发状态变化:");
-                                LogManager.LogInfo($"   - 配置地址: {_config.PLC.StartSignalAddress}");
-                                LogManager.LogInfo($"   - 读取值: {registerValue}");
-                                LogManager.LogInfo($"   - 当前状态: {(triggered ? "触发" : "未触发")}");
-                                _lastPLCTriggerState = triggered;
-                            }
-                            // 否则，每隔一段时间输出一次简要日志（可选）
-                            else if (DateTime.Now - _lastDetailedLogTime > _detailedLogInterval)
-                            {
-                                LogManager.LogDebug($"PLC状态检测 - 地址: M{originalAddress}, 值: {registerValue}, 触发: {triggered}");
-                                _lastDetailedLogTime = DateTime.Now;
-                            }
-                            if (triggered)
-                            {
-                                LogManager.LogInfo($"检测到PLC触发信号！地址: M{originalAddress}, 值: {registerValue}");
-                                OnPLCTrigger?.Invoke(true);
-                                return true;
-                            }
-                        }
-                        else
-                        {
-                            // 只在首次失败或长时间后再次输出
-                            if (_lastPLCTriggerState != false)
-                            {
-                                LogManager.LogWarning($"PLC地址 M{originalAddress} ReadInt16读取失败: {result?.Message}");
-                                _lastPLCTriggerState = false;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        LogManager.LogWarning($"PLC触发检测连接失败: {connect.Message}");
-                        connectSuccess_PLC = false;
-                        SafeTriggerDeviceConnectionChanged("PLC", false);
-                    }
-                }
-                return false;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"PLC触发检测异常: {ex.Message}");
-                return false;
-            }
-        }
-
-        public async Task<bool> SendPLCConfirmation()
-        {
-            if (!connectSuccess_PLC || busTcpClient == null)
-                return false;
-
-            try
-            {
-                string address = _config.PLC.ConfirmSignalAddress.Replace("M", "").Replace("m", "");
-
-                LogManager.LogInfo($"发送PLC确认信号到地址: M{address}");
-
-                var result = await Task.Run(() => busTcpClient.Write(address, (short)1));
-
-                if (result.IsSuccess)
-                {
-                    LogManager.LogInfo($"PLC确认信号发送成功 - 地址: {_config.PLC.ConfirmSignalAddress}");
-                    return true;
-                }
-                else
-                {
-                    LogManager.LogError($"PLC确认信号发送失败: {result.Message}");
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"发送PLC确认信号异常: {ex.Message}");
-                return false;
-            }
-        }
-
-
-        public async Task<bool> ResetPLCSignal()
-        {
-            if (!connectSuccess_PLC || busTcpClient == null)
-                return false;
-
-            try
-            {
-                string address = _config.PLC.ConfirmSignalAddress.Replace("M", "").Replace("m", "");
-                
-                var result = await Task.Run(() => busTcpClient.Write(address, (short)0));
-                
-                if (result.IsSuccess)
-                {
-                    LogManager.LogInfo($"PLC信号复位成功 - 地址: {_config.PLC.ConfirmSignalAddress}");
-                    return true;
-                }
-                return false;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"PLC信号复位失败: {ex.Message}");
-                return false;
-            }
-        }
 
         #endregion
 
         #region 新的PLC方法
-        /// <summary>
-        /// 检查PLC触发（D501边沿检测）
-        /// </summary>
-        public async Task<bool> CheckPLCTriggerNew()
-        {
-            if (!connectSuccess_PLC)
-                return false;
-            try
-            {
-                // 读取D501寄存器
-                var result = await ReadPLCDRegister(_config.PLC.TriggerAddress);
-
-                if (result.HasValue)
-                {
-                    int currentValue = result.Value;
-
-                    // 边沿检测：从0变为1时触发
-                    if (currentValue == 1 && _lastD501Value == 0)
-                    {
-                        _lastD501Value = currentValue;
-                        _lastD501ChangeTime = DateTime.Now;
-
-                        LogManager.LogInfo($"检测到PLC触发信号（上升沿）- {_config.PLC.TriggerAddress}: 0 → 1");
-                        OnPLCTrigger?.Invoke(true);
-                        return true;
-                    }
-
-                    _lastD501Value = currentValue;
-
-                    // 记录状态变化
-                    if (DateTime.Now - _lastDetailedLogTime > _detailedLogInterval)
-                    {
-                        LogManager.LogDebug($"PLC状态 - {_config.PLC.TriggerAddress}: {currentValue}");
-                        _lastDetailedLogTime = DateTime.Now;
-                    }
-                }
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"检查PLC触发异常: {ex.Message}");
-                return false;
-            }
-        }
         /// <summary>
         /// 读取PLC D寄存器
         /// </summary>
@@ -1077,57 +1028,133 @@ namespace TailInstallationSystem
         /// </summary>
         public async Task<bool> WritePLCDRegister(string address, int value)
         {
-            if (_isDisposing || _disposed)
-            {
-                LogManager.LogDebug($"跳过PLC写入（系统正在释放） - {address}: {value}");
-                return false;
-            }
-            
-            if (!connectSuccess_PLC || busTcpClient == null)
-                return false;
-                
+           
+            var startTime = DateTime.Now;
+
             try
             {
-                // D寄存器地址处理
-                string numericAddress = address.ToUpper().Replace("D", "");
-
-                LogManager.LogInfo($"写入PLC寄存器 - {address}: {value}");
-
+                // 检查系统释放状态
+                if (_isDisposing || _disposed)
+                {
+                    LogManager.LogDebug($"[PLC写入] 跳过（系统释放中） | {address}={value}");
+                    return false;
+                }
+                // 检查连接状态
+                if (!connectSuccess_PLC)
+                {
+                    LogManager.LogWarning($"[PLC写入] 失败（未连接） | {address}={value} | connectSuccess=false");
+                    return false;
+                }
                 if (busTcpClient == null)
                 {
-                    LogManager.LogWarning($"PLC客户端已释放，取消写入 - {address}");
+                    LogManager.LogWarning($"[PLC写入] 失败（客户端为null） | {address}={value}");
                     return false;
                 }
 
-                var result = await Task.Run(() => busTcpClient.Write(numericAddress, (short)value));
+
+                if (busTcpClient != null)
+                {
+                    try
+                    {
+                        string testAddress = address.ToUpper().Replace("D", "");
+                        var testRead = busTcpClient.ReadInt16(testAddress, 1);
+
+                        if (testRead.IsSuccess && testRead.Content != null)
+                        {
+                            LogManager.LogInfo($"  - 当前值: {testRead.Content[0]}");
+                        }
+
+                        if (!testRead.IsSuccess)
+                        {
+                            LogManager.LogWarning($"写入前验证失败，尝试重新连接...");
+                            busTcpClient.ConnectClose();
+                            var reconnect = busTcpClient.ConnectServer();
+                            LogManager.LogInfo($"重连结果: IsSuccess={reconnect.IsSuccess}, Message={reconnect.Message}");
+
+                            if (reconnect.IsSuccess)
+                            {
+                                connectSuccess_PLC = true;
+                            }
+                            else
+                            {
+                                connectSuccess_PLC = false;
+                                LogManager.LogError("重连失败，终止写入");
+                                return false;
+                            }
+                        }
+                    }
+                    catch (Exception testEx)
+                    {
+                        LogManager.LogError($"写入前验证异常: {testEx.Message}");
+                    }
+                }
+                LogManager.LogInfo($"====================");
+
+                // 准备写入
+                string numericAddress = address.ToUpper().Replace("D", "");
+                LogManager.LogInfo($"写入PLC寄存器 - {address}: {value}");
+
+                // 执行前再次检查
+                if (busTcpClient == null)
+                {
+                    LogManager.LogWarning($"[PLC写入] 执行前客户端变为null | {address}");
+                    return false;
+                }
+
+                // 执行写入
+                HslCommunication.OperateResult result;
+
+                try
+                {
+                    result = await Task.Run(() => busTcpClient.Write(numericAddress, (short)value));
+                }
+                catch (NullReferenceException nullEx)
+                {
+                    LogManager.LogError($"[PLC写入] 客户端空引用 | {address}={value} | 错误:{nullEx.Message}");
+                    return false;
+                }
+                catch (ObjectDisposedException disposeEx)
+                {
+                    LogManager.LogError($"[PLC写入] 客户端已释放 | {address}={value} | 错误:{disposeEx.Message}");
+                    return false;
+                }
+
+                // 检查结果
+                if (result == null)
+                {
+                    LogManager.LogError($"[PLC写入] 结果为null | {address}={value}");
+                    return false;
+                }
+
+                var duration = (DateTime.Now - startTime).TotalMilliseconds;
 
                 if (result.IsSuccess)
                 {
-                    LogManager.LogInfo($"PLC寄存器写入成功 - {address} = {value}");
+                    LogManager.LogInfo($"PLC寄存器写入成功 - {address} = {value} | 耗时:{duration:F0}ms");
                     return true;
                 }
                 else
                 {
-                    LogManager.LogError($"PLC寄存器写入失败 - {address}: {result.Message}");
+                    LogManager.LogError($"PLC寄存器写入失败 - {address}={value} | " +
+                    $"错误码:{result.ErrorCode} | " +
+                    $"消息:{result.Message} | " +
+                    $"耗时:{duration:F0}ms");
+
                     return false;
                 }
             }
-            catch (ObjectDisposedException)
-            {
-                LogManager.LogDebug($"PLC客户端已释放 - {address}");
-                return false;
-            }
-            catch (NullReferenceException)
-            {
-                LogManager.LogDebug($"PLC客户端为空 - {address}");
-                return false;
-            }
             catch (Exception ex)
             {
-                LogManager.LogError($"写入PLC寄存器异常 - {address}: {ex.Message}");
+                var duration = (DateTime.Now - startTime).TotalMilliseconds;
+                LogManager.LogError($"写入PLC寄存器异常 - {address}={value} | " +
+                                  $"类型:{ex.GetType().Name} | " +
+                                  $"错误:{ex.Message} | " +
+                                  $"耗时:{duration:F0}ms");
                 return false;
             }
         }
+
+
 
         /// <summary>
         /// 检查D500扫码触发信号（边沿检测）
@@ -1523,433 +1550,18 @@ namespace TailInstallationSystem
         {
             LogManager.LogInfo("复位所有PLC信号");
 
-            await WritePLCDRegister(_config.PLC.TriggerAddress, 0);      // D501 = 0
-            await WritePLCDRegister(_config.PLC.ScanCompleteAddress, 0); // D521 = 0
-            await WritePLCDRegister(_config.PLC.HeartbeatAddress, 0);    // D530 = 0
+            // 复位拧紧触发信号
+            await WritePLCDRegister(_config.PLC.TighteningTriggerAddress, 0);  // D501 = 0
+
+            // 复位扫码触发信号
+            await WritePLCDRegister(_config.PLC.ScanTriggerAddress, 0);        // D500 = 0
+
+            // 复位心跳信号
+            await WritePLCDRegister(_config.PLC.HeartbeatAddress, 0);          // D530 = 0
         }
+
         #endregion
 
-        #region PC通讯 
-
-        private async Task<bool> InitializePCConnection()
-        {
-            try
-            {
-                if (_config.PC.IsServer)
-                {
-                    // 服务端模式
-                    try
-                    {
-                        // 等待旧资源释放
-                        await Task.Delay(200);
-
-                        pcListener = new TcpListener(System.Net.IPAddress.Any, _config.PC.Port);
-
-                        // 设置端口复用选项
-                        pcListener.Server.SetSocketOption(
-                            SocketOptionLevel.Socket,
-                            SocketOptionName.ReuseAddress,
-                            true);
-
-                        pcListener.Start();
-                        pcServerRunning = true;
-                        Interlocked.Exchange(ref pcRetryCount, 0);
-                        LogManager.LogInfo($"PC服务端启动成功: 端口{_config.PC.Port}");
-
-                        // 启动客户端接收任务
-                        _ = Task.Run(async () =>
-                        {
-                            while (pcServerRunning && pcListener != null && !_cancellationTokenSource.Token.IsCancellationRequested)
-                            {
-                                try
-                                {
-                                    var client = await AcceptTcpClientWithCancellation(pcListener, _cancellationTokenSource.Token);
-                                    if (client != null)
-                                    {
-                                        pcRetryCount = 0;
-                                        connectSuccess_PC = true;
-                                        OnDeviceConnectionChanged?.Invoke("PC", true);
-
-                                        // 传递CancellationToken
-                                        _ = HandlePCClient(client, _cancellationTokenSource.Token);
-                                    }
-                                }
-                                catch (ObjectDisposedException)
-                                {
-                                    LogManager.LogInfo("PC监听器已释放，停止接受连接");
-                                    break;
-                                }
-                                catch (InvalidOperationException)
-                                {
-                                    LogManager.LogInfo("PC监听器已停止，退出监听循环");
-                                    break;
-                                }
-                                catch (Exception ex) when (!(ex is OutOfMemoryException || ex is StackOverflowException))
-                                {
-                                    LogManager.LogError($"接受PC客户端连接异常: {ex.Message}");
-                                    Interlocked.Increment(ref pcRetryCount);
-                                    if (pcRetryCount > 10)
-                                    {
-                                        LogManager.LogError("PC连接错误次数过多，停止监听");
-                                        break;
-                                    }
-                                    if (pcServerRunning && !_cancellationTokenSource.Token.IsCancellationRequested)
-                                    {
-                                        var delayMs = Math.Min(10000, 1000 * pcRetryCount);
-                                        await Task.Delay(delayMs, _cancellationTokenSource.Token);
-                                    }
-                                }
-                                catch (OperationCanceledException)
-                                {
-                                    LogManager.LogInfo("PC监听任务被取消");
-                                    break;
-                                }
-                            }
-                            LogManager.LogInfo("PC服务端监听循环已退出");
-                        }, _cancellationTokenSource.Token);
-
-                        LogManager.LogInfo($"PC服务端运行中... 新连接会被自动处理");
-                        return true;
-                    }
-                    catch (SocketException ex)
-                    {
-                        if (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
-                        {
-                            LogManager.LogError($"PC端口 {_config.PC.Port} 被占用，无法启动服务端");
-                        }
-                        else
-                        {
-                            LogManager.LogError($"PC服务端启动失败: {ex.Message}");
-                        }
-                        return false;
-                    }
-                }
-                else
-                {
-                    // 客户端模式
-                    if (socket_PC != null)
-                    {
-                        try { socket_PC.Close(); } catch { }
-                        socket_PC = null;
-                    }
-                    socket_PC = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                    socket_PC.ReceiveTimeout = _config.PC.TimeoutSeconds * 1000;
-                    socket_PC.SendTimeout = _config.PC.TimeoutSeconds * 1000;
-                    using (var timeoutCts = new CancellationTokenSource(_config.PC.TimeoutSeconds * 1000))
-                    using (var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(
-                        timeoutCts.Token, _cancellationTokenSource.Token))
-                    {
-                        var connectTask = socket_PC.ConnectAsync(_config.PC.IP, _config.PC.Port);
-                        var timeoutTask = Task.Delay(_config.PC.TimeoutSeconds * 1000, combinedCts.Token);
-                        var completedTask = await Task.WhenAny(connectTask, timeoutTask);
-                        if (completedTask == connectTask && !connectTask.IsFaulted && socket_PC.Connected)
-                        {
-                            connectSuccess_PC = true;
-                            LogManager.LogInfo($"PC TCP连接成功: {_config.PC.IP}:{_config.PC.Port}");
-                            _ = Task.Run(() => ReceivePCData(_cancellationTokenSource.Token), _cancellationTokenSource.Token);
-                            return true;
-                        }
-                        else
-                        {
-                            connectSuccess_PC = false;
-                            LogManager.LogWarning($"PC TCP连接超时: {_config.PC.IP}:{_config.PC.Port}");
-                            return false;
-                        }
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                LogManager.LogInfo("PC连接初始化被取消");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                connectSuccess_PC = false;
-                LogManager.LogWarning($"PC TCP连接失败: {ex.Message}");
-                return false;
-            }
-        }
-
-
-        private async Task HandlePCClient(TcpClient client, CancellationToken cancellationToken)
-        {
-            string clientEndpoint = "未知客户端";
-            try
-            {
-                clientEndpoint = client?.Client?.RemoteEndPoint?.ToString() ?? "未知客户端";
-                LogManager.LogInfo($"PC客户端已连接: {clientEndpoint}");
-
-                if (client == null)
-                {
-                    LogManager.LogWarning("接收到空的客户端连接");
-                    return;
-                }
-
-                // 添加到活跃连接字典
-                _pcClients.TryAdd(clientEndpoint, client);
-
-                using (client)
-                using (var stream = client.GetStream())
-                {
-                    // 添加到活跃流字典
-                    _pcStreams.TryAdd(clientEndpoint, stream);
-
-                    byte[] buffer = new byte[_config.PC.BufferSize];
-                    client.ReceiveTimeout = _config.PC.TimeoutSeconds * 1000;
-                    client.SendTimeout = _config.PC.TimeoutSeconds * 1000;
-
-                    // 使用循环读取完整数据
-                    var receivedData = new List<byte>();
-                    int totalBytesRead = 0;
-                    var timeout = DateTime.Now.AddSeconds(_config.PC.TimeoutSeconds);
-
-                    while (DateTime.Now < timeout && !cancellationToken.IsCancellationRequested)
-                    {
-                        if (stream.DataAvailable)
-                        {
-                            int bytesRead = stream.Read(buffer, 0, buffer.Length);
-                            if (bytesRead > 0)
-                            {
-                                receivedData.AddRange(buffer.Take(bytesRead));
-                                totalBytesRead += bytesRead;
-
-                                string currentData = Encoding.UTF8.GetString(receivedData.ToArray());
-                                if (currentData.TrimEnd().EndsWith("}"))
-                                {
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            await Task.Delay(10, cancellationToken);
-                        }
-                    }
-
-                    // 检查是否被取消
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        LogManager.LogInfo($"PC客户端处理被取消: {clientEndpoint}");
-                        return;
-                    }
-
-                    if (totalBytesRead > 0)
-                    {
-                        string json = Encoding.UTF8.GetString(receivedData.ToArray());
-
-                        if (string.IsNullOrWhiteSpace(json))
-                        {
-                            LogManager.LogWarning($"从 {clientEndpoint} 接收到空数据");
-                            return;
-                        }
-
-                        if (!IsValidJsonString(json))
-                        {
-                            LogManager.LogError($"从 {clientEndpoint} 接收到无效JSON格式数据");
-                            return;
-                        }
-
-                        try
-                        {
-                            var testParse = JsonConvert.DeserializeObject(json);
-                            LogManager.LogInfo($"收到PC工序JSON数据: {json.Substring(0, Math.Min(100, json.Length))}...");
-
-                            OnDataReceived?.Invoke(json);
-
-                            await Task.Delay(50, cancellationToken);
-
-                            var response = new
-                            {
-                                Status = "OK",
-                                Message = "数据已接收",
-                                Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-                            };
-
-                            string responseJson = JsonConvert.SerializeObject(response);
-                            byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
-
-                            // 写入前检查取消和流状态
-                            if (stream.CanWrite && !cancellationToken.IsCancellationRequested)
-                            {
-                                await stream.WriteAsync(responseBytes, 0, responseBytes.Length, cancellationToken);
-                                await stream.FlushAsync(cancellationToken);
-                                LogManager.LogInfo($"已发送响应到客户端 {clientEndpoint}: {responseJson}");
-                            }
-                        }
-                        catch (JsonException ex)
-                        {
-                            LogManager.LogError($"JSON解析失败: {ex.Message}");
-
-                            string cleanedJson = CleanJsonString(json);
-                            if (cleanedJson != json && IsValidJsonString(cleanedJson))
-                            {
-                                LogManager.LogInfo("JSON清理后重新解析");
-                                OnDataReceived?.Invoke(cleanedJson);
-                            }
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            LogManager.LogInfo($"PC客户端数据处理被取消: {clientEndpoint}");
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        LogManager.LogWarning($"PC客户端 {clientEndpoint} 发送了空数据或超时");
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                LogManager.LogDebug($"PC客户端处理被取消: {clientEndpoint}");
-            }
-            catch (Exception ex)
-            {
-                // 不记录取消导致的异常
-                if (!(ex is ObjectDisposedException || ex is InvalidOperationException) || !cancellationToken.IsCancellationRequested)
-                {
-                    LogManager.LogError($"PC客户端 {clientEndpoint} 数据处理异常: {ex.Message}");
-                }
-
-                if (ex is OutOfMemoryException || ex is StackOverflowException)
-                {
-                    LogManager.LogError("严重系统异常，需要立即处理");
-                    throw;
-                }
-            }
-            finally
-            {
-                // 清理连接字典
-                _pcClients.TryRemove(clientEndpoint, out _);
-                _pcStreams.TryRemove(clientEndpoint, out _);
-
-                LogManager.LogInfo($"PC客户端 {clientEndpoint} 连接已关闭");
-            }
-        }
-
-
-        // 辅助方法
-        private bool IsValidJsonString(string json)
-        {
-            if (string.IsNullOrWhiteSpace(json))
-                return false;
-
-            json = json.Trim();
-
-            // 基本格式检查
-            if (!(json.StartsWith("{") && json.EndsWith("}")) &&
-                !(json.StartsWith("[") && json.EndsWith("]")))
-            {
-                return false;
-            }
-
-            try
-            {
-                JsonConvert.DeserializeObject(json);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private string CleanJsonString(string json)
-        {
-            if (string.IsNullOrEmpty(json))
-                return json;
-
-            // 移除可能的控制字符和无效字符
-            var cleaned = new StringBuilder();
-            foreach (char c in json)
-            {
-                if (c >= 32 || c == '\t' || c == '\n' || c == '\r')
-                {
-                    cleaned.Append(c);
-                }
-            }
-
-            return cleaned.ToString().Trim();
-        }
-
-        private async Task ReceivePCData(CancellationToken cancellationToken)
-        {
-            byte[] buffer = new byte[_config.PC.BufferSize];
-            try
-            {
-                while (connectSuccess_PC && socket_PC != null && socket_PC.Connected && !cancellationToken.IsCancellationRequested)
-                {
-                    try
-                    {
-                        int received = await socket_PC.ReceiveAsync(new ArraySegment<byte>(buffer), SocketFlags.None);
-                        if (received > 0)
-                        {
-                            string data = Encoding.UTF8.GetString(buffer, 0, received);
-                            LogManager.LogInfo($"收到PC数据: {data.Substring(0, Math.Min(100, data.Length))}...");
-                            OnDataReceived?.Invoke(data);
-                        }
-                        else
-                        {
-                            LogManager.LogInfo("PC连接已正常关闭");
-                            break;
-                        }
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        LogManager.LogInfo("PC Socket已被释放");
-                        break;
-                    }
-                    catch (SocketException ex)
-                    {
-                        LogManager.LogError($"PC Socket异常: {ex.Message}");
-                        break;
-                    }
-                    catch (Exception ex) when (!(ex is OutOfMemoryException || ex is StackOverflowException))
-                    {
-                        LogManager.LogError($"接收PC数据异常: {ex.Message}");
-                        break;
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                LogManager.LogInfo("PC数据接收任务被取消");
-            }
-            finally
-            {
-                connectSuccess_PC = false;
-                OnDeviceConnectionChanged?.Invoke("PC", false);
-                LogManager.LogWarning("PC数据接收线程已停止");
-            }
-        }
-
-        /// <summary>
-        /// 向PC客户端发送响应消息
-        /// 注意：当前架构下，此方法不会被实际使用，响应在 HandlePCClient 中直接发送
-        /// </summary>
-        public async Task<bool> SendResponseToClient(string productCode, object responseData)
-        {
-            try
-            {
-                // 当前架构下，_pcStreams 字典为空，因为 HandlePCClient 是短连接
-                // 响应直接在 HandlePCClient 方法中发送
-                LogManager.LogDebug($"SendResponseToClient 被调用，但响应已在 HandlePCClient 中发送");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"发送响应失败: {ex.Message}");
-                return false;
-            }
-        }
-
-
-        #endregion
 
         #region 扫码枪通讯 
 
@@ -2158,14 +1770,14 @@ namespace TailInstallationSystem
                     var connect = await testClient.ConnectServerAsync();
                     if (connect.IsSuccess)
                     {
-                        string address = _config.PLC.TriggerAddress.Replace("D", "");
-
+                        // 使用新的拧紧触发地址测试连接
+                        string address = _config.PLC.TighteningTriggerAddress.Replace("D", "");
                         var readResult = await Task.Run(() => testClient.ReadInt16(address, 1));
                         testClient.ConnectClose();
-                        
+
                         if (readResult.IsSuccess)
                         {
-                            LogManager.LogInfo($"PLC测试成功，{_config.PLC.StartSignalAddress}保持寄存器值: {readResult.Content[0]}");
+                            LogManager.LogInfo($"PLC测试成功，D501寄存器值: {readResult.Content[0]}");
                             return true;
                         }
                         else
@@ -2189,10 +1801,6 @@ namespace TailInstallationSystem
             return await TestTcpConnection(_config.Scanner.IP, _config.Scanner.Port, "扫码枪");
         }
 
-        public async Task<bool> TestPCConnection()
-        {
-            return await TestTcpConnection(_config.PC.IP, _config.PC.Port, "PC");
-        }
 
         private async Task<bool> TestTcpConnection(string ip, int port, string deviceName)
         {
@@ -2228,10 +1836,10 @@ namespace TailInstallationSystem
 
         #endregion
 
+
         #region 状态查询 
 
         public bool IsPLCConnected => connectSuccess_PLC;
-        public bool IsPCConnected => connectSuccess_PC;
         public bool IsScannerConnected => connectSuccess_Scanner;
         public bool IsTighteningAxisConnected => connectSuccess_TighteningAxis; 
 
@@ -2333,7 +1941,6 @@ namespace TailInstallationSystem
 
                 // 4. 重置连接状态（防止新操作）
                 connectSuccess_PLC = false;
-                connectSuccess_PC = false;
                 connectSuccess_Scanner = false;
                 connectSuccess_TighteningAxis = false;
 
@@ -2343,7 +1950,6 @@ namespace TailInstallationSystem
                     _lastPLCStatus = false;
                     _lastScannerStatus = false;
                     _lastTighteningStatus = false;
-                    _lastPCStatus = false;
                     LogManager.LogInfo("状态防抖标志已重置");
                 }
 
@@ -2391,7 +1997,6 @@ namespace TailInstallationSystem
         }
 
 
-
         private void SafeCloseAllConnections()
         {
             // 先停止拧紧轴轮询
@@ -2432,78 +2037,6 @@ namespace TailInstallationSystem
             catch (Exception ex)
             {
                 LogManager.LogError($"关闭拧紧轴连接异常: {ex.Message}");
-            }
-
-            // PC连接优化
-            try
-            {
-                // 1. 先关闭所有活跃客户端连接
-                foreach (var clientPair in _pcClients.ToArray())
-                {
-                    try
-                    {
-                        var client = clientPair.Value;
-                        if (client != null && client.Connected)
-                        {
-                            client.Client.Shutdown(SocketShutdown.Both);
-                            client.Close();
-                            LogManager.LogDebug($"已关闭PC客户端连接: {clientPair.Key}");
-                        }
-                    }
-                    catch (Exception clientEx)
-                    {
-                        LogManager.LogDebug($"关闭PC客户端异常: {clientEx.Message}");
-                    }
-                }
-                _pcClients.Clear();
-                _pcStreams.Clear();
-
-                // 2. 停止监听器
-                if (pcListener != null)
-                {
-                    pcServerRunning = false;
-
-                    try
-                    {
-                        // 显式关闭底层Socket
-                        if (pcListener.Server != null)
-                        {
-                            pcListener.Server.Close();
-                        }
-                        pcListener.Stop();
-                    }
-                    catch (Exception stopEx)
-                    {
-                        LogManager.LogDebug($"停止PC监听器异常: {stopEx.Message}");
-                    }
-
-                    pcListener = null;
-                    LogManager.LogInfo("PC监听器已停止");
-                }
-
-                // 3. 关闭旧的Socket连接
-                if (socket_PC != null)
-                {
-                    try
-                    {
-                        if (socket_PC.Connected)
-                        {
-                            socket_PC.Shutdown(SocketShutdown.Both);
-                        }
-                    }
-                    catch { }
-
-                    socket_PC.Close();
-                    socket_PC = null;
-                }
-
-                // 4. 等待端口释放
-                Thread.Sleep(500);
-                LogManager.LogInfo("PC连接资源已释放（等待500ms）");
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"关闭PC连接异常: {ex.Message}");
             }
 
             // Scanner连接优化
@@ -2722,13 +2255,6 @@ namespace TailInstallationSystem
                             shouldTrigger = true;
                         }
                         break;
-                    case "PC":
-                        if (_lastPCStatus != isConnected)
-                        {
-                            _lastPCStatus = isConnected;
-                            shouldTrigger = true;
-                        }
-                        break;
                 }
 
                 if (shouldTrigger)
@@ -2745,7 +2271,6 @@ namespace TailInstallationSystem
             }
         }
 
-
         #endregion
 
 
@@ -2756,15 +2281,22 @@ namespace TailInstallationSystem
                 case -999: return "初始";
                 case 0: return "空闲";
                 case 1: return "运行中";
-                case 10: return "合格";
+                case 11: return "合格";
                 case 21: return "扭矩过低";
                 case 22: return "扭矩过高";
                 case 23: return "超时";
                 case 24: return "角度过低";
                 case 25: return "角度过高";
-                default: return $"状态{statusCode}";
+                case 100: return "执行命令";
+                case 500: return "回零中";
+                case 1000: return "执行命令";
+                default:
+                    if (statusCode >= 21 && statusCode <= 30)
+                        return $"不合格({statusCode})";
+                    return $"状态{statusCode}";
             }
         }
+
 
     }
 }

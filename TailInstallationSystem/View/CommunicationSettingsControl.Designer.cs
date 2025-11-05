@@ -29,12 +29,6 @@
         private void InitializeComponent()
         {
             this.saveButton = new AntdUI.Button();
-            this.pcGroupBox = new System.Windows.Forms.GroupBox();
-            this.pcTestButton = new AntdUI.Button();
-            this.pcPortTextBox = new AntdUI.Input();
-            this.pcPortLabel = new AntdUI.Label();
-            this.pcIpTextBox = new AntdUI.Input();
-            this.pcIpLabel = new AntdUI.Label();
             this.tighteningAxisGroupBox = new System.Windows.Forms.GroupBox();
             this.tighteningAxisTestButton = new AntdUI.Button();
             this.tighteningAxisPortTextBox = new AntdUI.Input();
@@ -58,10 +52,16 @@
             this.plcIpTextBox = new AntdUI.Input();
             this.plcIpLabel = new AntdUI.Label();
             this.titleLabel = new AntdUI.Label();
-            this.pcGroupBox.SuspendLayout();
+            this.mesGroupBox = new System.Windows.Forms.GroupBox();
+            this.mesTestButton = new AntdUI.Button();
+            this.mesApiKeyTextBox = new AntdUI.Input();
+            this.mesApiKeyLabel = new AntdUI.Label();
+            this.mesUrlLabel = new AntdUI.Label();
+            this.mesUrlTextBox = new AntdUI.Input();
             this.tighteningAxisGroupBox.SuspendLayout();
             this.scannerGroupBox.SuspendLayout();
             this.plcGroupBox.SuspendLayout();
+            this.mesGroupBox.SuspendLayout();
             this.SuspendLayout();
             // 
             // saveButton
@@ -76,75 +76,10 @@
             this.saveButton.TabIndex = 17;
             this.saveButton.Text = "保存设置";
             this.saveButton.Type = AntdUI.TTypeMini.Success;
+
+
             // 
-            // pcGroupBox
-            // 
-            this.pcGroupBox.Controls.Add(this.pcTestButton);
-            this.pcGroupBox.Controls.Add(this.pcPortTextBox);
-            this.pcGroupBox.Controls.Add(this.pcPortLabel);
-            this.pcGroupBox.Controls.Add(this.pcIpTextBox);
-            this.pcGroupBox.Controls.Add(this.pcIpLabel);
-            this.pcGroupBox.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
-            this.pcGroupBox.Location = new System.Drawing.Point(653, 267);
-            this.pcGroupBox.Margin = new System.Windows.Forms.Padding(4);
-            this.pcGroupBox.Name = "pcGroupBox";
-            this.pcGroupBox.Padding = new System.Windows.Forms.Padding(4);
-            this.pcGroupBox.Size = new System.Drawing.Size(600, 162);
-            this.pcGroupBox.TabIndex = 16;
-            this.pcGroupBox.TabStop = false;
-            this.pcGroupBox.Text = "PC通讯设置";
-            // 
-            // pcTestButton
-            // 
-            this.pcTestButton.Location = new System.Drawing.Point(440, 106);
-            this.pcTestButton.Margin = new System.Windows.Forms.Padding(4);
-            this.pcTestButton.Name = "pcTestButton";
-            this.pcTestButton.Size = new System.Drawing.Size(133, 38);
-            this.pcTestButton.TabIndex = 4;
-            this.pcTestButton.Text = "测试连接";
-            this.pcTestButton.Type = AntdUI.TTypeMini.Primary;
-            // 
-            // pcPortTextBox
-            // 
-            this.pcPortTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.pcPortTextBox.Location = new System.Drawing.Point(467, 31);
-            this.pcPortTextBox.Margin = new System.Windows.Forms.Padding(4);
-            this.pcPortTextBox.Name = "pcPortTextBox";
-            this.pcPortTextBox.Size = new System.Drawing.Size(107, 35);
-            this.pcPortTextBox.TabIndex = 3;
-            this.pcPortTextBox.Text = "8888";
-            // 
-            // pcPortLabel
-            // 
-            this.pcPortLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.pcPortLabel.Location = new System.Drawing.Point(373, 34);
-            this.pcPortLabel.Margin = new System.Windows.Forms.Padding(4);
-            this.pcPortLabel.Name = "pcPortLabel";
-            this.pcPortLabel.Size = new System.Drawing.Size(80, 29);
-            this.pcPortLabel.TabIndex = 2;
-            this.pcPortLabel.Text = "端口:";
-            // 
-            // pcIpTextBox
-            // 
-            this.pcIpTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.pcIpTextBox.Location = new System.Drawing.Point(147, 31);
-            this.pcIpTextBox.Margin = new System.Windows.Forms.Padding(4);
-            this.pcIpTextBox.Name = "pcIpTextBox";
-            this.pcIpTextBox.Size = new System.Drawing.Size(200, 35);
-            this.pcIpTextBox.TabIndex = 1;
-            this.pcIpTextBox.Text = "192.168.1.102";
-            // 
-            // pcIpLabel
-            // 
-            this.pcIpLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.pcIpLabel.Location = new System.Drawing.Point(27, 34);
-            this.pcIpLabel.Margin = new System.Windows.Forms.Padding(4);
-            this.pcIpLabel.Name = "pcIpLabel";
-            this.pcIpLabel.Size = new System.Drawing.Size(107, 29);
-            this.pcIpLabel.TabIndex = 0;
-            this.pcIpLabel.Text = "IP地址:";
-            // 
-            // tighteningAxisGroupBox - 修改后的拧紧轴组
+            // tighteningAxisGroupBox 
             // 
             this.tighteningAxisGroupBox.Controls.Add(this.tighteningAxisTestButton);
             this.tighteningAxisGroupBox.Controls.Add(this.tighteningAxisStationTextBox);
@@ -387,6 +322,7 @@
             this.plcIpTextBox.Size = new System.Drawing.Size(200, 35);
             this.plcIpTextBox.TabIndex = 1;
             this.plcIpTextBox.Text = "192.168.1.88";
+
             // 
             // plcIpLabel
             // 
@@ -408,13 +344,80 @@
             this.titleLabel.TabIndex = 12;
             this.titleLabel.Text = "通讯设置";
             // 
+            // mesGroupBox
+            // 
+            this.mesGroupBox.Controls.Add(this.mesTestButton);
+            this.mesGroupBox.Controls.Add(this.mesApiKeyTextBox);
+            this.mesGroupBox.Controls.Add(this.mesApiKeyLabel);
+            this.mesGroupBox.Controls.Add(this.mesUrlTextBox);
+            this.mesGroupBox.Controls.Add(this.mesUrlLabel);
+            this.mesGroupBox.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.mesGroupBox.Location = new System.Drawing.Point(653, 267);
+            this.mesGroupBox.Margin = new System.Windows.Forms.Padding(4);
+            this.mesGroupBox.Name = "mesGroupBox";
+            this.mesGroupBox.Padding = new System.Windows.Forms.Padding(4);
+            this.mesGroupBox.Size = new System.Drawing.Size(600, 162);
+            this.mesGroupBox.TabIndex = 18;
+            this.mesGroupBox.TabStop = false;
+            this.mesGroupBox.Text = "MES系统连接设置";
+            // 
+            // mesTestButton
+            // 
+            this.mesTestButton.Location = new System.Drawing.Point(440, 106);
+            this.mesTestButton.Margin = new System.Windows.Forms.Padding(4);
+            this.mesTestButton.Name = "mesTestButton";
+            this.mesTestButton.Size = new System.Drawing.Size(133, 38);
+            this.mesTestButton.TabIndex = 4;
+            this.mesTestButton.Text = "测试连接";
+            this.mesTestButton.Type = AntdUI.TTypeMini.Primary;
+            // 
+            // mesApiKeyTextBox
+            // 
+            this.mesApiKeyTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.mesApiKeyTextBox.Location = new System.Drawing.Point(147, 75);
+            this.mesApiKeyTextBox.Margin = new System.Windows.Forms.Padding(4);
+            this.mesApiKeyTextBox.Name = "mesApiKeyTextBox";
+            this.mesApiKeyTextBox.Size = new System.Drawing.Size(280, 35);
+            this.mesApiKeyTextBox.TabIndex = 3;
+            this.mesApiKeyTextBox.Text = "";
+            // 
+            // mesApiKeyLabel
+            // 
+            this.mesApiKeyLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.mesApiKeyLabel.Location = new System.Drawing.Point(27, 78);
+            this.mesApiKeyLabel.Margin = new System.Windows.Forms.Padding(4);
+            this.mesApiKeyLabel.Name = "mesApiKeyLabel";
+            this.mesApiKeyLabel.Size = new System.Drawing.Size(107, 29);
+            this.mesApiKeyLabel.TabIndex = 2;
+            this.mesApiKeyLabel.Text = "API密钥:";
+            // 
+            // mesUrlTextBox
+            // 
+            this.mesUrlTextBox.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.mesUrlTextBox.Location = new System.Drawing.Point(147, 31);
+            this.mesUrlTextBox.Margin = new System.Windows.Forms.Padding(4);
+            this.mesUrlTextBox.Name = "mesUrlTextBox";
+            this.mesUrlTextBox.Size = new System.Drawing.Size(426, 35);
+            this.mesUrlTextBox.TabIndex = 1;
+            this.mesUrlTextBox.Text = "ws://192.168.1.100:9001";
+            // 
+            // mesUrlLabel
+            // 
+            this.mesUrlLabel.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.mesUrlLabel.Location = new System.Drawing.Point(27, 34);
+            this.mesUrlLabel.Margin = new System.Windows.Forms.Padding(4);
+            this.mesUrlLabel.Name = "mesUrlLabel";
+            this.mesUrlLabel.Size = new System.Drawing.Size(107, 29);
+            this.mesUrlLabel.TabIndex = 0;
+            this.mesUrlLabel.Text = "服务器地址:";
+            // 
             // CommunicationSettingsControl
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.White;
+            this.Controls.Add(this.mesGroupBox);
             this.Controls.Add(this.saveButton);
-            this.Controls.Add(this.pcGroupBox);
             this.Controls.Add(this.tighteningAxisGroupBox);
             this.Controls.Add(this.scannerGroupBox);
             this.Controls.Add(this.plcGroupBox);
@@ -423,11 +426,11 @@
             this.Name = "CommunicationSettingsControl";
             this.Padding = new System.Windows.Forms.Padding(13, 12, 13, 25);
             this.Size = new System.Drawing.Size(1280, 538);
-            this.pcGroupBox.ResumeLayout(false);
-            this.tighteningAxisGroupBox.ResumeLayout(false); // 修改控件名称
+            this.tighteningAxisGroupBox.ResumeLayout(false);
             this.tighteningAxisGroupBox.PerformLayout();
             this.scannerGroupBox.ResumeLayout(false);
             this.plcGroupBox.ResumeLayout(false);
+            this.mesGroupBox.ResumeLayout(false);
             this.ResumeLayout(false);
 
         }
@@ -435,14 +438,6 @@
         #endregion
 
         private AntdUI.Button saveButton;
-        private System.Windows.Forms.GroupBox pcGroupBox;
-        private AntdUI.Button pcTestButton;
-        private AntdUI.Input pcPortTextBox;
-        private AntdUI.Label pcPortLabel;
-        private AntdUI.Input pcIpTextBox;
-        private AntdUI.Label pcIpLabel;
-
-        // 修改后的拧紧轴控件声明
         private System.Windows.Forms.GroupBox tighteningAxisGroupBox;
         private AntdUI.Button tighteningAxisTestButton;
         private AntdUI.Input tighteningAxisPortTextBox;
@@ -458,6 +453,7 @@
         private AntdUI.Label scannerPortLabel;
         private AntdUI.Input scannerIpTextBox;
         private AntdUI.Label scannerIpLabel;
+
         private System.Windows.Forms.GroupBox plcGroupBox;
         private AntdUI.Button plcTestButton;
         private AntdUI.Input plcStationTextBox;
@@ -467,5 +463,12 @@
         private AntdUI.Input plcIpTextBox;
         private AntdUI.Label plcIpLabel;
         private AntdUI.Label titleLabel;
+
+        private System.Windows.Forms.GroupBox mesGroupBox;
+        private AntdUI.Button mesTestButton;
+        private AntdUI.Input mesApiKeyTextBox;
+        private AntdUI.Label mesApiKeyLabel;
+        private AntdUI.Input mesUrlTextBox;
+        private AntdUI.Label mesUrlLabel;
     }
 }

@@ -123,6 +123,7 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1126, 704);
             this.Controls.Add(this.panel1);
+            this.Icon = new System.Drawing.Icon("Resources\\SJS 512-1.ico");
             this.Name = "LoginForm";
             this.Text = "登录界面";
             this.panel1.ResumeLayout(false);

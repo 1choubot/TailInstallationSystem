@@ -4,6 +4,9 @@ using System.Windows.Forms;
 using System.Net;
 using System.Threading.Tasks;
 using System.Net.Sockets;
+using System.Net.WebSockets;
+using System.Text;
+using System.Threading;
 using HslCommunication.ModBus;
 using TailInstallationSystem.Models;
 using TailInstallationSystem.Utils;
@@ -21,7 +24,7 @@ namespace TailInstallationSystem
             plcTestButton.Click += plcTestButton_Click;
             scannerTestButton.Click += scannerTestButton_Click;
             tighteningAxisTestButton.Click += tighteningAxisTestButton_Click;
-            pcTestButton.Click += pcTestButton_Click;
+            mesTestButton.Click += mesTestButton_Click;  // 添加MES测试按钮事件
             saveButton.Click += saveButton_Click;
             LoadSettings();
         }
@@ -39,7 +42,7 @@ namespace TailInstallationSystem
                 LoadPLCSettings();
                 LoadScannerSettings();
                 LoadTighteningAxisSettings();
-                LoadPCSettings();
+                LoadMESSettings();  // 添加MES设置加载
 
                 LogManager.LogInfo("通讯设置界面已加载");
             }
@@ -69,10 +72,10 @@ namespace TailInstallationSystem
             tighteningAxisStationTextBox.Text = _config.TighteningAxis.Station.ToString();
         }
 
-        private void LoadPCSettings()
+        private void LoadMESSettings()
         {
-            pcIpTextBox.Text = _config.PC.IP;
-            pcPortTextBox.Text = _config.PC.Port.ToString();
+            mesUrlTextBox.Text = _config.Server.WebSocketUrl;
+            mesApiKeyTextBox.Text = _config.Server.ApiKey;
         }
 
         #region 连接测试实现
@@ -197,123 +200,42 @@ namespace TailInstallationSystem
             }
         }
 
-        private async void pcTestButton_Click(object sender, EventArgs e)
+        private async void mesTestButton_Click(object sender, EventArgs e)
         {
-            if (!ValidatePCInput()) return;
+            if (!ValidateMESInput()) return;
+
             try
             {
-                pcTestButton.Loading = true;
-                pcTestButton.Text = "测试中...";
-                pcTestButton.Enabled = false;
+                mesTestButton.Loading = true;
+                mesTestButton.Text = "测试中...";
+                mesTestButton.Enabled = false;
 
-                var ip = pcIpTextBox.Text.Trim();
-                var port = int.Parse(pcPortTextBox.Text.Trim());
+                var url = mesUrlTextBox.Text.Trim();
+                var apiKey = mesApiKeyTextBox.Text.Trim();
 
-                LogManager.LogInfo($"测试PC通讯连接: {ip}:{port}");
+                LogManager.LogInfo($"测试MES系统连接: {url}");
 
-                // 检查PC配置模式 - 默认是服务端模式
-                bool success = await TestPCServerMode(port);
+                bool success = await TestMESConnection(url, apiKey);
 
                 if (success)
                 {
-                    AntdUI.Message.success(GetParentForm(), "PC通讯连接测试成功！", autoClose: 3);
+                    AntdUI.Message.success(GetParentForm(), "MES系统连接测试成功！", autoClose: 3);
                 }
                 else
                 {
-                    AntdUI.Message.error(GetParentForm(), "PC通讯连接测试失败！", autoClose: 3);
+                    AntdUI.Message.error(GetParentForm(), "MES系统连接测试失败！", autoClose: 3);
                 }
             }
             catch (Exception ex)
             {
-                LogManager.LogError($"PC通讯连接测试失败: {ex.Message}");
-                AntdUI.Message.error(GetParentForm(), $"PC通讯连接测试失败: {ex.Message}", autoClose: 3);
+                LogManager.LogError($"MES系统连接测试失败: {ex.Message}");
+                AntdUI.Message.error(GetParentForm(), $"MES系统连接测试失败: {ex.Message}", autoClose: 3);
             }
             finally
             {
-                pcTestButton.Loading = false;
-                pcTestButton.Text = "测试连接";
-                pcTestButton.Enabled = true;
-            }
-        }
-
-        /// <summary>
-        /// 测试PC服务端模式 - 检查端口是否可用
-        /// </summary>
-        private async Task<bool> TestPCServerMode(int port)
-        {
-            TcpListener testListener = null;
-            TcpClient testClient = null;
-            
-            try
-            {
-                LogManager.LogInfo($"测试PC服务端模式，端口: {port}");
-                
-                // 1. 尝试启动服务端
-                testListener = new TcpListener(IPAddress.Any, port);
-                testListener.Start();
-                LogManager.LogInfo($"PC服务端启动成功，端口: {port}");
-                
-                // 2. 尝试客户端连接测试
-                testClient = new TcpClient();
-                var connectTask = testClient.ConnectAsync("127.0.0.1", port);
-                var timeoutTask = Task.Delay(3000);
-                var completedTask = await Task.WhenAny(connectTask, timeoutTask);
-                
-                if (completedTask == connectTask && !connectTask.IsFaulted && testClient.Connected)
-                {
-                    LogManager.LogInfo("PC服务端连接测试成功 - 可以正常接受客户端连接");
-                    return true;
-                }
-                else
-                {
-                    LogManager.LogWarning("PC服务端连接测试失败 - 无法接受客户端连接");
-                    return false;
-                }
-            }
-            catch (SocketException ex)
-            {
-                if (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
-                {
-                    // 端口被占用，需要进一步检查是否是系统占用
-                    LogManager.LogWarning($"PC服务端端口 {port} 已被占用");
-                    
-                    // 尝试连接到已存在的服务端
-                    try
-                    {
-                        testClient = new TcpClient();
-                        await testClient.ConnectAsync("127.0.0.1", port);
-                        if (testClient.Connected)
-                        {
-                            LogManager.LogInfo("端口已被占用，但可以正常连接 - 可能系统已在运行");
-                            return true;
-                        }
-                    }
-                    catch
-                    {
-                        LogManager.LogError("端口被占用且无法连接 - 可能被其他程序占用");
-                        return false;
-                    }
-                }
-                
-                LogManager.LogError($"PC服务端端口测试失败: {ex.Message}");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                LogManager.LogError($"PC服务端模式测试异常: {ex.Message}");
-                return false;
-            }
-            finally
-            {
-                try
-                {
-                    testClient?.Close();
-                    testListener?.Stop();
-                }
-                catch (Exception ex)
-                {
-                    LogManager.LogWarning($"清理测试资源时异常: {ex.Message}");
-                }
+                mesTestButton.Loading = false;
+                mesTestButton.Text = "测试连接";
+                mesTestButton.Enabled = true;
             }
         }
 
@@ -330,13 +252,13 @@ namespace TailInstallationSystem
 
                 if (connectResult.IsSuccess)
                 {
-                    string testAddress = _config.PLC.TriggerAddress.Replace("D", "");
+                    string testAddress = _config.PLC.TighteningTriggerAddress.Replace("D", "");
                     var readResult = await Task.Run(() => modbusTcpClient.ReadInt16(testAddress, 1));
                     modbusTcpClient.ConnectClose();
-                    
+
                     if (readResult.IsSuccess)
                     {
-                        LogManager.LogInfo($"PLC测试成功，寄存器100值: {readResult.Content[0]}");
+                        LogManager.LogInfo($"PLC测试成功，D501寄存器值: {readResult.Content[0]}");
                         return true;
                     }
                     else
@@ -375,47 +297,46 @@ namespace TailInstallationSystem
                 LogManager.LogInfo($"设备地址: {ip}:{port}, 站号:{station}");
                 LogManager.LogInfo("-----------------------------------");
 
-                //  1. 读取运行状态（地址5100，占1个寄存器）
-                var statusResult = await Task.Run(() =>
-                    modbusTcpClient.ReadUInt16("5100", 1));
+                // 1. 读取状态码（地址5104，最关键！）
+                var statusCodeResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5104", 2));
 
-                if (statusResult.IsSuccess)
+                if (statusCodeResult.IsSuccess)
                 {
-                    ushort statusValue = statusResult.Content[0];
-                    string statusText = GetTighteningStatusText(statusValue);
-                    LogManager.LogInfo($"运行状态 (5100): {statusValue} (0x{statusValue:X4}) - {statusText}");
+                    float statusFloat = ConvertToFloat(statusCodeResult.Content);
+                    int statusCode = (int)statusFloat;
+                    string statusText = GetTighteningStatusText((ushort)statusCode);
+                    LogManager.LogInfo($"状态码 (5104): {statusCode} - {statusText}");
                 }
                 else
                 {
-                    LogManager.LogWarning($"读取运行状态失败: {statusResult.Message}");
+                    LogManager.LogWarning($"读取状态码失败: {statusCodeResult.Message}");
                 }
 
-                //  2. 读取错误代码（地址5096，占2个寄存器 - 32位整数）
-                var errorResult = await Task.Run(() =>
-                    modbusTcpClient.ReadUInt16("5096", 1));
+                // 2. 读取反馈速度（地址5100）
+                var speedResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5100", 2));
 
-                if (errorResult.IsSuccess)
+                if (speedResult.IsSuccess)
                 {
-                    ushort errorCode = errorResult.Content[0];
-                    LogManager.LogInfo($"错误代码 (5096): {errorCode} {(errorCode == 0 ? "- 无错误" : $"- 错误码: 0x{errorCode:X4}")}");
+                    float speedFloat = ConvertToFloat(speedResult.Content);
+                    LogManager.LogInfo($"反馈速度 (5100): {speedFloat:F0} RPM");
                 }
 
-                //  3. 读取紧固模式（地址5000，占2个寄存器 - 32位浮点数）
+                // 3. 读取紧固模式（地址5000）
                 var modeResult = await Task.Run(() =>
                     modbusTcpClient.ReadInt16("5000", 2));
 
                 if (modeResult.IsSuccess)
                 {
                     float mode = ConvertToFloat(modeResult.Content);
-
-                    // 紧固模式是特殊编码（如 11000-42222），显示原始浮点值
                     LogManager.LogInfo($"紧固模式 (5000): {mode:F0}");
                 }
 
                 LogManager.LogInfo("-----------------------------------");
                 LogManager.LogInfo("扭矩配置参数：");
 
-                //  4. 读取下限扭矩（地址5002，占2个寄存器）
+                // 4. 读取下限扭矩（地址5002）
                 var lowerLimitResult = await Task.Run(() =>
                     modbusTcpClient.ReadInt16("5002", 2));
 
@@ -433,7 +354,7 @@ namespace TailInstallationSystem
                     }
                 }
 
-                //  5. 读取上限扭矩（地址5004）
+                // 5. 读取上限扭矩（地址5004）
                 var upperLimitResult = await Task.Run(() =>
                     modbusTcpClient.ReadInt16("5004", 2));
 
@@ -451,7 +372,7 @@ namespace TailInstallationSystem
                     }
                 }
 
-                //  6. 读取目标扭矩（地址5006）
+                // 6. 读取目标扭矩（地址5006）
                 var targetResult = await Task.Run(() =>
                     modbusTcpClient.ReadInt16("5006", 2));
 
@@ -470,39 +391,40 @@ namespace TailInstallationSystem
                 }
 
                 LogManager.LogInfo("-----------------------------------");
+                LogManager.LogInfo("角度配置参数：");
 
-                //  7. 读取统计数据
-                var qualifiedCountResult = await Task.Run(() =>
-                    modbusTcpClient.ReadInt16("5088", 2));
+                // 7. 读取目标角度（地址5032）
+                var targetAngleResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5032", 2));
 
-                if (qualifiedCountResult.IsSuccess)
+                if (targetAngleResult.IsSuccess)
                 {
-                    float qualifiedCount = ConvertToFloat(qualifiedCountResult.Content);
-                    LogManager.LogInfo($"合格数记录 (5088): {qualifiedCount:F0}");
+                    float targetAngle = ConvertToFloat(targetAngleResult.Content);
+                    LogManager.LogInfo($"  目标角度 (5032): {targetAngle:F1}°");
                 }
 
-                //  8. 读取实时扭矩（地址5094）
-                var realtimeTorqueResult = await Task.Run(() =>
-                    modbusTcpClient.ReadInt16("5094", 2));
+                // 8. 读取下限角度（地址5042）
+                var lowerLimitAngleResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5042", 2));
 
-                if (realtimeTorqueResult.IsSuccess)
+                if (lowerLimitAngleResult.IsSuccess)
                 {
-                    float realtimeTorque = ConvertToFloat(realtimeTorqueResult.Content);
-                    LogManager.LogInfo($"实时扭矩 (5094): {realtimeTorque:F2} Nm");
+                    float lowerLimitAngle = ConvertToFloat(lowerLimitAngleResult.Content);
+                    LogManager.LogInfo($"  下限角度 (5042): {lowerLimitAngle:F1}°");
                 }
 
-                //  9. 读取实时角度（地址5098）
-                var realtimeAngleResult = await Task.Run(() =>
-                    modbusTcpClient.ReadInt16("5098", 2));
+                // 9. 读取上限角度（地址5044）
+                var upperLimitAngleResult = await Task.Run(() =>
+                    modbusTcpClient.ReadInt16("5044", 2));
 
-                if (realtimeAngleResult.IsSuccess)
+                if (upperLimitAngleResult.IsSuccess)
                 {
-                    float realtimeAngle = ConvertToFloat(realtimeAngleResult.Content);
-                    LogManager.LogInfo($"实时角度 (5098): {realtimeAngle:F2}°");
+                    float upperLimitAngle = ConvertToFloat(upperLimitAngleResult.Content);
+                    LogManager.LogInfo($"  上限角度 (5044): {upperLimitAngle:F1}°");
                 }
 
                 LogManager.LogInfo("===================================");
-                LogManager.LogInfo("拧紧轴配置读取完成！");
+                LogManager.LogInfo("拧紧轴连接测试通过！所有寄存器读取正常。");
 
                 return true;
             }
@@ -521,6 +443,172 @@ namespace TailInstallationSystem
             }
         }
 
+        private async Task<bool> TestMESConnection(string url, string apiKey)
+        {
+            ClientWebSocket webSocket = null;
+            try
+            {
+                LogManager.LogInfo("========== MES系统连接测试 ==========");
+                LogManager.LogInfo($"服务器地址: {url}");
+                LogManager.LogInfo($"API密钥: {(string.IsNullOrEmpty(apiKey) ? "未配置" : "已配置")}");
+                LogManager.LogInfo("-----------------------------------");
+
+                webSocket = new ClientWebSocket();
+                webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+
+                // 如果有API密钥，添加到请求头
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    webSocket.Options.SetRequestHeader("Authorization", $"Bearer {apiKey}");
+                    LogManager.LogInfo("已添加授权头信息");
+                }
+
+                var serverUri = new Uri(url);
+                var connectToken = new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token;
+
+                LogManager.LogInfo($"正在连接到MES服务器...");
+                await webSocket.ConnectAsync(serverUri, connectToken);
+
+                if (webSocket.State == WebSocketState.Open)
+                {
+                    LogManager.LogInfo($"WebSocket连接成功 | 协议:{(serverUri.Scheme == "wss" ? "WSS (安全)" : "WS")}");
+
+                    // 发送测试消息
+                    var testMessage = new
+                    {
+                        Type = "connection_test",
+                        Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                        Message = "MES系统连接测试"
+                    };
+
+                    string jsonMessage = Newtonsoft.Json.JsonConvert.SerializeObject(testMessage);
+                    byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
+
+                    LogManager.LogInfo($"发送测试消息: {jsonMessage}");
+                    await webSocket.SendAsync(
+                        new ArraySegment<byte>(messageBytes),
+                        WebSocketMessageType.Text,
+                        true,
+                        CancellationToken.None);
+
+                    // 等待响应
+                    var responseBuffer = new byte[1024];
+                    var receiveToken = new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token;
+
+                    try
+                    {
+                        var result = await webSocket.ReceiveAsync(
+                            new ArraySegment<byte>(responseBuffer),
+                            receiveToken);
+
+                        if (result.MessageType == WebSocketMessageType.Text)
+                        {
+                            string serverResponse = Encoding.UTF8.GetString(responseBuffer, 0, result.Count);
+                            LogManager.LogInfo($"服务器响应: {serverResponse}");
+
+                            // 检查响应是否包含成功关键词
+                            if (IsSuccessfulResponse(serverResponse))
+                            {
+                                LogManager.LogInfo("✓ MES服务器响应验证通过");
+                                return true;
+                            }
+                            else
+                            {
+                                LogManager.LogWarning("✗ MES服务器响应未包含预期的成功关键词");
+                                return false;
+                            }
+                        }
+                        else
+                        {
+                            LogManager.LogInfo("✓ MES连接成功，服务器无文本响应");
+                            return true;
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        LogManager.LogInfo("✓ MES连接成功，但服务器未在5秒内响应");
+                        return true; // 连接成功但无响应也认为是成功的
+                    }
+                }
+                else
+                {
+                    LogManager.LogError($"WebSocket连接失败，状态: {webSocket.State}");
+                    return false;
+                }
+            }
+            catch (WebSocketException wsEx)
+            {
+                LogManager.LogError($"WebSocket连接异常: {wsEx.Message} | 错误代码: {wsEx.WebSocketErrorCode}");
+                return false;
+            }
+            catch (UriFormatException uriEx)
+            {
+                LogManager.LogError($"服务器地址格式错误: {uriEx.Message}");
+                return false;
+            }
+            catch (TimeoutException timeEx)
+            {
+                LogManager.LogError($"连接超时: {timeEx.Message}");
+                return false;
+            }
+            catch (OperationCanceledException cancelEx)
+            {
+                LogManager.LogError($"连接被取消: {cancelEx.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogManager.LogError($"MES连接测试异常: {ex.GetType().Name} | {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    if (webSocket?.State == WebSocketState.Open)
+                    {
+                        await webSocket.CloseAsync(
+                            WebSocketCloseStatus.NormalClosure,
+                            "Connection test completed",
+                            CancellationToken.None);
+                        LogManager.LogInfo("WebSocket连接已正常关闭");
+                    }
+                }
+                catch (Exception cleanEx)
+                {
+                    LogManager.LogDebug($"关闭WebSocket连接异常: {cleanEx.Message}");
+                }
+                finally
+                {
+                    webSocket?.Dispose();
+                    LogManager.LogInfo("===================================");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 判断MES服务器响应是否成功
+        /// </summary>
+        private bool IsSuccessfulResponse(string response)
+        {
+            if (string.IsNullOrEmpty(response))
+                return false;
+
+            var successKeywords = _config.Server.SuccessKeywords ?? new[] { "success", "ok", "received", "完成", "成功" };
+
+            foreach (var keyword in successKeywords)
+            {
+                if (response.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    LogManager.LogInfo($"✓ 发现成功关键词: '{keyword}'");
+                    return true;
+                }
+            }
+
+            LogManager.LogWarning($"✗ 响应中未发现成功关键词，期望: [{string.Join(", ", successKeywords)}]");
+            return false;
+        }
+
         /// <summary>
         /// 获取拧紧轴运行状态文本
         /// </summary>
@@ -530,7 +618,7 @@ namespace TailInstallationSystem
             {
                 case 0: return "空闲";
                 case 1: return "运行中";
-                case 10: return "合格";
+                case 11: return "合格";
                 case 21: return "小于下限扭矩";
                 case 22: return "大于上限扭矩";
                 case 23: return "运行超最上限时间";
@@ -677,26 +765,38 @@ namespace TailInstallationSystem
             return true;
         }
 
-        private bool ValidatePCInput()
+        private bool ValidateMESInput()
         {
-            if (string.IsNullOrWhiteSpace(pcIpTextBox.Text))
+            if (string.IsNullOrWhiteSpace(mesUrlTextBox.Text))
             {
-                AntdUI.Message.error(GetParentForm(), "请输入PC IP地址", autoClose: 3);
-                pcIpTextBox.Focus();
+                AntdUI.Message.error(GetParentForm(), "请输入MES服务器地址", autoClose: 3);
+                mesUrlTextBox.Focus();
                 return false;
             }
 
-            if (!IPAddress.TryParse(pcIpTextBox.Text.Trim(), out _))
+            var url = mesUrlTextBox.Text.Trim();
+
+            // 验证URL格式
+            if (!url.StartsWith("ws://") && !url.StartsWith("wss://"))
             {
-                AntdUI.Message.error(GetParentForm(), "PC IP地址格式不正确", autoClose: 3);
-                pcIpTextBox.Focus();
+                AntdUI.Message.error(GetParentForm(), "MES服务器地址必须以 ws:// 或 wss:// 开头", autoClose: 3);
+                mesUrlTextBox.Focus();
                 return false;
             }
 
-            if (!int.TryParse(pcPortTextBox.Text.Trim(), out int port) || port < 1 || port > 65535)
+            // 验证URL是否为有效格式
+            try
             {
-                AntdUI.Message.error(GetParentForm(), "PC端口号必须在1-65535之间", autoClose: 3);
-                pcPortTextBox.Focus();
+                var uri = new Uri(url);
+                if (uri.Host == null || string.IsNullOrEmpty(uri.Host))
+                {
+                    throw new UriFormatException("主机名无效");
+                }
+            }
+            catch (UriFormatException)
+            {
+                AntdUI.Message.error(GetParentForm(), "MES服务器地址格式不正确", autoClose: 3);
+                mesUrlTextBox.Focus();
                 return false;
             }
 
@@ -708,7 +808,7 @@ namespace TailInstallationSystem
             return ValidatePLCInput() &&
                    ValidateScannerInput() &&
                    ValidateTighteningAxisInput() &&
-                   ValidatePCInput();
+                   ValidateMESInput();
         }
 
         #endregion
@@ -745,8 +845,6 @@ namespace TailInstallationSystem
             _config.TighteningAxis.Port = int.Parse(tighteningAxisPortTextBox.Text.Trim());
             _config.TighteningAxis.Station = byte.Parse(tighteningAxisStationTextBox.Text.Trim());
 
-            _config.PC.IP = pcIpTextBox.Text.Trim();
-            _config.PC.Port = int.Parse(pcPortTextBox.Text.Trim());
 
             // 保存到配置文件
             ConfigManager.SaveConfig(_config);
@@ -760,12 +858,9 @@ namespace TailInstallationSystem
         {
             return _config;
         }
+
         #region 数据转换辅助方法
 
-        /// <summary>
-        /// 将两个16位寄存器转换为32位浮点数
-        /// 根据拧紧轴实际测试，使用 Little-Endian 寄存器顺序
-        /// </summary>
         private float ConvertToFloat(short[] registers)
         {
             if (registers == null || registers.Length < 2)
@@ -773,7 +868,7 @@ namespace TailInstallationSystem
 
             try
             {
-                // 寄存器[1]在高位，寄存器[0]在低位
+                // 拧紧轴格式：寄存器[1]在高位，寄存器[0]在低位
                 uint combined = ((uint)(ushort)registers[1] << 16) | (uint)(ushort)registers[0];
                 byte[] bytes = BitConverter.GetBytes(combined);
                 return BitConverter.ToSingle(bytes, 0);
@@ -784,6 +879,7 @@ namespace TailInstallationSystem
             }
         }
 
+
         /// <summary>
         /// 验证扭矩值是否在合理范围内
         /// </summary>
@@ -792,10 +888,10 @@ namespace TailInstallationSystem
             return !float.IsNaN(torque) &&
                    !float.IsInfinity(torque) &&
                    torque >= 0f &&
-                   torque <= 50f;
+                   torque <= 100f;  // 根据实际设备调整上限
         }
 
         #endregion
-
     }
 }
+

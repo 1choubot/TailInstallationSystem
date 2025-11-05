@@ -26,5 +26,7 @@ namespace TailInstallationSystem
         public Nullable<System.DateTime> CreatedTime { get; set; }
         public Nullable<System.DateTime> CompletedTime { get; set; }
         public Nullable<System.DateTime> UploadedTime { get; set; }
+        public Nullable<bool> IsNG { get; set; }
+        public string NGProcessId { get; set; }
     }
 }

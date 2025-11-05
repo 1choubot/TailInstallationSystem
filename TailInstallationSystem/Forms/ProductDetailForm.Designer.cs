@@ -35,6 +35,8 @@
             this.jsonTitleLabel = new AntdUI.Label();
             this.infoCard = new AntdUI.Panel();
             this.infoTableLayout = new System.Windows.Forms.TableLayoutPanel();
+            this.lblQualityStatus = new AntdUI.Label();
+            this.lblQualityStatusValue = new AntdUI.Label();
             this.lblUploadTime = new AntdUI.Label();
             this.lblUploadTimeValue = new AntdUI.Label();
             this.lblUploadStatus = new AntdUI.Label();
@@ -90,13 +92,13 @@
             this.jsonCard.Controls.Add(this.jsonTextBox);
             this.jsonCard.Controls.Add(this.jsonTitleLabel);
             this.jsonCard.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.jsonCard.Location = new System.Drawing.Point(0, 200);
+            this.jsonCard.Location = new System.Drawing.Point(0, 250);
             this.jsonCard.Margin = new System.Windows.Forms.Padding(0, 16, 0, 0);
             this.jsonCard.Name = "jsonCard";
             this.jsonCard.Padding = new System.Windows.Forms.Padding(16);
             this.jsonCard.Radius = 8;
             this.jsonCard.Shadow = 2;
-            this.jsonCard.Size = new System.Drawing.Size(868, 356);
+            this.jsonCard.Size = new System.Drawing.Size(868, 306);
             this.jsonCard.TabIndex = 1;
             // 
             // jsonTextBox
@@ -108,7 +110,7 @@
             this.jsonTextBox.Name = "jsonTextBox";
             this.jsonTextBox.ReadOnly = true;
             this.jsonTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.jsonTextBox.Size = new System.Drawing.Size(836, 288);
+            this.jsonTextBox.Size = new System.Drawing.Size(836, 238);
             this.jsonTextBox.TabIndex = 1;
             this.jsonTextBox.WordWrap = true;
             // 
@@ -134,7 +136,7 @@
             this.infoCard.Padding = new System.Windows.Forms.Padding(16);
             this.infoCard.Radius = 8;
             this.infoCard.Shadow = 2;
-            this.infoCard.Size = new System.Drawing.Size(868, 200);
+            this.infoCard.Size = new System.Drawing.Size(868, 250);
             this.infoCard.TabIndex = 0;
             // 
             // infoTableLayout
@@ -144,6 +146,8 @@
             this.infoTableLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 35F));
             this.infoTableLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 15F));
             this.infoTableLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 35F));
+            this.infoTableLayout.Controls.Add(this.lblQualityStatus, 0, 3);
+            this.infoTableLayout.Controls.Add(this.lblQualityStatusValue, 1, 3);
             this.infoTableLayout.Controls.Add(this.lblUploadTime, 2, 2);
             this.infoTableLayout.Controls.Add(this.lblUploadTimeValue, 3, 2);
             this.infoTableLayout.Controls.Add(this.lblUploadStatus, 0, 2);
@@ -159,12 +163,36 @@
             this.infoTableLayout.Dock = System.Windows.Forms.DockStyle.Fill;
             this.infoTableLayout.Location = new System.Drawing.Point(16, 52);
             this.infoTableLayout.Name = "infoTableLayout";
-            this.infoTableLayout.RowCount = 3;
-            this.infoTableLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
-            this.infoTableLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
-            this.infoTableLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
-            this.infoTableLayout.Size = new System.Drawing.Size(836, 132);
+            this.infoTableLayout.RowCount = 4;
+            this.infoTableLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.infoTableLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.infoTableLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.infoTableLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.infoTableLayout.Size = new System.Drawing.Size(836, 182);
             this.infoTableLayout.TabIndex = 1;
+            // 
+            // lblQualityStatus
+            // 
+            this.lblQualityStatus.Anchor = System.Windows.Forms.AnchorStyles.Left;
+            this.lblQualityStatus.AutoSize = true;
+            this.lblQualityStatus.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
+            this.lblQualityStatus.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(64)))), ((int)(((byte)(64)))));
+            this.lblQualityStatus.Location = new System.Drawing.Point(3, 150);
+            this.lblQualityStatus.Name = "lblQualityStatus";
+            this.lblQualityStatus.Size = new System.Drawing.Size(68, 17);
+            this.lblQualityStatus.TabIndex = 13;
+            this.lblQualityStatus.Text = "质量状态：";
+            // 
+            // lblQualityStatusValue
+            // 
+            this.lblQualityStatusValue.Anchor = System.Windows.Forms.AnchorStyles.Left;
+            this.lblQualityStatusValue.AutoSize = true;
+            this.lblQualityStatusValue.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
+            this.lblQualityStatusValue.Location = new System.Drawing.Point(128, 150);
+            this.lblQualityStatusValue.Name = "lblQualityStatusValue";
+            this.lblQualityStatusValue.Size = new System.Drawing.Size(30, 17);
+            this.lblQualityStatusValue.TabIndex = 12;
+            this.lblQualityStatusValue.Text = "N/A";
             // 
             // lblUploadTime
             // 
@@ -172,7 +200,7 @@
             this.lblUploadTime.AutoSize = true;
             this.lblUploadTime.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
             this.lblUploadTime.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(64)))), ((int)(((byte)(64)))));
-            this.lblUploadTime.Location = new System.Drawing.Point(420, 102);
+            this.lblUploadTime.Location = new System.Drawing.Point(420, 105);
             this.lblUploadTime.Name = "lblUploadTime";
             this.lblUploadTime.Size = new System.Drawing.Size(68, 17);
             this.lblUploadTime.TabIndex = 11;
@@ -183,7 +211,7 @@
             this.lblUploadTimeValue.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.lblUploadTimeValue.AutoSize = true;
             this.lblUploadTimeValue.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-            this.lblUploadTimeValue.Location = new System.Drawing.Point(545, 102);
+            this.lblUploadTimeValue.Location = new System.Drawing.Point(545, 105);
             this.lblUploadTimeValue.Name = "lblUploadTimeValue";
             this.lblUploadTimeValue.Size = new System.Drawing.Size(30, 17);
             this.lblUploadTimeValue.TabIndex = 10;
@@ -195,7 +223,7 @@
             this.lblUploadStatus.AutoSize = true;
             this.lblUploadStatus.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
             this.lblUploadStatus.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(64)))), ((int)(((byte)(64)))));
-            this.lblUploadStatus.Location = new System.Drawing.Point(3, 102);
+            this.lblUploadStatus.Location = new System.Drawing.Point(3, 105);
             this.lblUploadStatus.Name = "lblUploadStatus";
             this.lblUploadStatus.Size = new System.Drawing.Size(68, 17);
             this.lblUploadStatus.TabIndex = 9;
@@ -206,7 +234,7 @@
             this.lblUploadStatusValue.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.lblUploadStatusValue.AutoSize = true;
             this.lblUploadStatusValue.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-            this.lblUploadStatusValue.Location = new System.Drawing.Point(128, 102);
+            this.lblUploadStatusValue.Location = new System.Drawing.Point(128, 105);
             this.lblUploadStatusValue.Name = "lblUploadStatusValue";
             this.lblUploadStatusValue.Size = new System.Drawing.Size(30, 17);
             this.lblUploadStatusValue.TabIndex = 8;
@@ -218,7 +246,7 @@
             this.lblCompletedTime.AutoSize = true;
             this.lblCompletedTime.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
             this.lblCompletedTime.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(64)))), ((int)(((byte)(64)))));
-            this.lblCompletedTime.Location = new System.Drawing.Point(420, 58);
+            this.lblCompletedTime.Location = new System.Drawing.Point(420, 59);
             this.lblCompletedTime.Name = "lblCompletedTime";
             this.lblCompletedTime.Size = new System.Drawing.Size(68, 17);
             this.lblCompletedTime.TabIndex = 7;
@@ -229,7 +257,7 @@
             this.lblCompletedTimeValue.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.lblCompletedTimeValue.AutoSize = true;
             this.lblCompletedTimeValue.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-            this.lblCompletedTimeValue.Location = new System.Drawing.Point(545, 58);
+            this.lblCompletedTimeValue.Location = new System.Drawing.Point(545, 59);
             this.lblCompletedTimeValue.Name = "lblCompletedTimeValue";
             this.lblCompletedTimeValue.Size = new System.Drawing.Size(30, 17);
             this.lblCompletedTimeValue.TabIndex = 6;
@@ -241,7 +269,7 @@
             this.lblCreatedTime.AutoSize = true;
             this.lblCreatedTime.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
             this.lblCreatedTime.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(64)))), ((int)(((byte)(64)))));
-            this.lblCreatedTime.Location = new System.Drawing.Point(3, 58);
+            this.lblCreatedTime.Location = new System.Drawing.Point(3, 59);
             this.lblCreatedTime.Name = "lblCreatedTime";
             this.lblCreatedTime.Size = new System.Drawing.Size(68, 17);
             this.lblCreatedTime.TabIndex = 5;
@@ -252,7 +280,7 @@
             this.lblCreatedTimeValue.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.lblCreatedTimeValue.AutoSize = true;
             this.lblCreatedTimeValue.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-            this.lblCreatedTimeValue.Location = new System.Drawing.Point(128, 58);
+            this.lblCreatedTimeValue.Location = new System.Drawing.Point(128, 59);
             this.lblCreatedTimeValue.Name = "lblCreatedTimeValue";
             this.lblCreatedTimeValue.Size = new System.Drawing.Size(30, 17);
             this.lblCreatedTimeValue.TabIndex = 4;
@@ -415,8 +443,14 @@
         private AntdUI.Label lblUploadStatusValue;
         private AntdUI.Label lblUploadTime;
         private AntdUI.Label lblUploadTimeValue;
+        private AntdUI.Label lblQualityStatus;
+        private AntdUI.Label lblQualityStatusValue;
         private AntdUI.Panel jsonCard;
         private AntdUI.Label jsonTitleLabel;
         private System.Windows.Forms.TextBox jsonTextBox;
+
+        private AntdUI.Label lblNGProcess = null;
+        private AntdUI.Label lblNGProcessValue = null;
     }
 }
+
